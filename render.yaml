@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: ai-quiz-generator-backend
+    env: python
+    plan: free
+    buildCommand: |
+      cd backend
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: |
+      cd backend
+      uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quiz-database
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+databases:
+  - name: quiz-database
+    plan: free
