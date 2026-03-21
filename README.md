@@ -2,14 +2,6 @@
 
 An AI-powered full-stack educational web application that transforms Wikipedia articles into interactive quizzes for smarter learning. Built with FastAPI, React, and Google Gemini AI.
 
-## 🌟 Live Demo
-
-**Frontend**: [Add your Vercel link here]  
-**Backend API**: [Add your Render/Railway link here]  
-**Demo Video**: [Add your own demo video link here]
-
----
-
 ## 🚀 Features
 
 ### 🤖 AI-Powered Quiz Generation
@@ -74,5 +66,5 @@ An AI-powered full-stack educational web application that transforms Wikipedia a
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/YOUR_USERNAME/ai-quizipedia.git
+git clone https://github.com/Mansi-Priya3005/ai-quizipedia.git
 cd ai-quizipedia
