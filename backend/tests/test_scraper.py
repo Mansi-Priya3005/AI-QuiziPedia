@@ -1,7 +1,9 @@
+import json
+
 import httpx
 import pytest
 
-from scraper import ScrapeError, scrape_wikipedia, validate_wikipedia_url
+from scraper import ScrapeError, _parse_wikipedia_url, scrape_wikipedia, validate_wikipedia_url
 
 
 @pytest.mark.parametrize(
@@ -19,24 +21,35 @@ def test_validate_wikipedia_url(url, expected):
     assert validate_wikipedia_url(url) is expected
 
 
-FAKE_ARTICLE_HTML = """
-<html><body>
-<h1 class="firstHeading">Ada Lovelace</h1>
-<div id="mw-content-text"><div class="mw-parser-output">
-<p>Ada Lovelace was an English mathematician.<sup>[1]</sup></p>
-<table><tr><td>junk table data</td></tr></table>
-<p>She worked on Charles Babbage's Analytical Engine.</p>
-</div></div>
-</body></html>
-"""
+def test_parse_wikipedia_url_extracts_lang_and_title():
+    lang, title = _parse_wikipedia_url("https://en.wikipedia.org/wiki/Ada_Lovelace")
+    assert lang == "en"
+    assert title == "Ada Lovelace"
+
+
+def test_parse_wikipedia_url_handles_simple_subdomain():
+    lang, title = _parse_wikipedia_url("https://simple.wikipedia.org/wiki/Cat")
+    assert lang == "simple"
+    assert title == "Cat"
+
+
+def _mock_api_response(pages):
+    def handler(request):
+        return httpx.Response(200, content=json.dumps({"query": {"pages": pages}}).encode())
+
+    return httpx.MockTransport(handler)
 
 
 @pytest.mark.asyncio
 async def test_scrape_wikipedia_extracts_clean_text(monkeypatch):
-    def handler(request):
-        return httpx.Response(200, content=FAKE_ARTICLE_HTML.encode())
-
-    transport = httpx.MockTransport(handler)
+    transport = _mock_api_response(
+        [
+            {
+                "title": "Ada Lovelace",
+                "extract": "== Early life ==\nAda Lovelace was an English mathematician.\n\n== Work ==\nShe worked on Charles Babbage's Analytical Engine.",
+            }
+        ]
+    )
     orig_client = httpx.AsyncClient
     monkeypatch.setattr(
         httpx, "AsyncClient", lambda *a, **kw: orig_client(*a, transport=transport, **kw)
@@ -44,32 +57,41 @@ async def test_scrape_wikipedia_extracts_clean_text(monkeypatch):
 
     text, title = await scrape_wikipedia("https://en.wikipedia.org/wiki/Ada_Lovelace")
     assert title == "Ada Lovelace"
-    assert "junk table data" not in text
-    assert "[1]" not in text
     assert "Ada Lovelace was an English mathematician" in text
+    assert "Charles Babbage's Analytical Engine" in text
+    assert "==" not in text  # section header markers stripped
 
 
 @pytest.mark.asyncio
-async def test_scrape_wikipedia_404_raises_specific_error(monkeypatch):
-    def handler(request):
-        return httpx.Response(404, content=b"not found")
-
-    transport = httpx.MockTransport(handler)
+async def test_scrape_wikipedia_missing_page_raises(monkeypatch):
+    transport = _mock_api_response(
+        [{"title": "Nonexistent Article Xyz", "missing": True}]
+    )
     orig_client = httpx.AsyncClient
     monkeypatch.setattr(
         httpx, "AsyncClient", lambda *a, **kw: orig_client(*a, transport=transport, **kw)
     )
 
     with pytest.raises(ScrapeError, match="doesn't exist"):
-        await scrape_wikipedia("https://en.wikipedia.org/wiki/Nonexistent")
+        await scrape_wikipedia("https://en.wikipedia.org/wiki/Nonexistent_Article_Xyz")
 
 
 @pytest.mark.asyncio
-async def test_scrape_wikipedia_no_content_raises(monkeypatch):
+async def test_scrape_wikipedia_empty_extract_raises(monkeypatch):
+    transport = _mock_api_response([{"title": "Empty Page", "extract": ""}])
+    orig_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda *a, **kw: orig_client(*a, transport=transport, **kw)
+    )
+
+    with pytest.raises(ScrapeError, match="no readable content"):
+        await scrape_wikipedia("https://en.wikipedia.org/wiki/Empty_Page")
+
+
+@pytest.mark.asyncio
+async def test_scrape_wikipedia_http_error_raises(monkeypatch):
     def handler(request):
-        return httpx.Response(
-            200, content=b'<html><body><h1 class="firstHeading">X</h1></body></html>'
-        )
+        return httpx.Response(403, content=b"blocked")
 
     transport = httpx.MockTransport(handler)
     orig_client = httpx.AsyncClient
@@ -77,5 +99,5 @@ async def test_scrape_wikipedia_no_content_raises(monkeypatch):
         httpx, "AsyncClient", lambda *a, **kw: orig_client(*a, transport=transport, **kw)
     )
 
-    with pytest.raises(ScrapeError):
-        await scrape_wikipedia("https://en.wikipedia.org/wiki/Empty")
+    with pytest.raises(ScrapeError, match="HTTP 403"):
+        await scrape_wikipedia("https://en.wikipedia.org/wiki/Something")
