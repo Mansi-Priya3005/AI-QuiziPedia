@@ -211,6 +211,20 @@ const QuizCard = ({ quiz, mode = 'view', onModeChange }) => {
   const [selectedAttempt, setSelectedAttempt] = useState(null);
   const [viewMode, setViewMode] = useState(mode); // 'view', 'take', 'review'
 
+  const loadAttempts = useCallback(async () => {
+    if (!quiz?.id) return;
+    setLoadingAttempts(true);
+    try {
+      const attemptsData = await api.getQuizAttempts(quiz.id);
+      setAttempts(attemptsData);
+    } catch (error) {
+      console.error('Failed to load attempts:', error);
+      setAttempts([]);
+    } finally {
+      setLoadingAttempts(false);
+    }
+  }, [quiz?.id]);
+
   useEffect(() => {
     if (quiz?.id) {
       loadAttempts();
@@ -225,20 +239,6 @@ const QuizCard = ({ quiz, mode = 'view', onModeChange }) => {
       setActiveSection('overview');
     }
   }, [mode]);
-
-  const loadAttempts = useCallback(async () => {
-    if (!quiz?.id) return;
-    setLoadingAttempts(true);
-    try {
-      const attemptsData = await api.getQuizAttempts(quiz.id);
-      setAttempts(attemptsData);
-    } catch (error) {
-      console.error('Failed to load attempts:', error);
-      setAttempts([]);
-    } finally {
-      setLoadingAttempts(false);
-    }
-  }, [quiz?.id]);
 
   const handleQuizComplete = (result) => {
     loadAttempts();

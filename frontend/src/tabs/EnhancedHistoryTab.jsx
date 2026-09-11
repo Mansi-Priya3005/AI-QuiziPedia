@@ -23,14 +23,6 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
   const [sortBy, setSortBy] = useState('newest');
   const [viewMode, setViewMode] = useState('list');
 
-  useEffect(() => {
-    loadHistory();
-  }, []);
-
-  useEffect(() => {
-    filterAndSortQuizzes();
-  }, [filterAndSortQuizzes]);
-
   const loadHistory = async () => {
     setLoading(true);
     try {
@@ -66,6 +58,14 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
 
     setFilteredQuizzes(filtered);
   }, [quizzes, searchTerm, sortBy]);
+
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
+  useEffect(() => {
+    filterAndSortQuizzes();
+  }, [filterAndSortQuizzes]);
 
   const handleViewDetails = async (quiz) => {
     try {
