@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Brain, Sparkles, History, Home, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Header from './components/Header';
 import Hero from './components/Hero';
 import EnhancedGenerateQuizTab from './tabs/EnhancedGenerateQuizTab';
 import EnhancedHistoryTab from './tabs/EnhancedHistoryTab';
@@ -81,7 +80,7 @@ function App() {
               </div>
               <div>
                 <h1 className="text-xl font-bold bg-gradient-to-r from-gray-900 to-primary-600 bg-clip-text text-transparent">
-                  AI QuizGenius
+                  AI QuiziPedia
                 </h1>
                 <p className="text-xs text-gray-500 font-medium">
                   Transform Articles into Quizzes
@@ -175,7 +174,7 @@ function App() {
                   <Brain className="text-white" size={20} />
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold">AI QuizGenius</h3>
+                  <h3 className="text-xl font-bold">AI QuiziPedia</h3>
                   <p className="text-gray-400 text-sm">Transform Articles into Quizzes</p>
                 </div>
               </div>
@@ -249,7 +248,7 @@ function App() {
           </div>
           
           <div className="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
-            <p>&copy; 2024 AI QuizGenius. Built with FastAPI, React, and Google Gemini AI.</p>
+            <p>&copy; 2026 AI QuiziPedia. Built with FastAPI, React, and Google Gemini AI.</p>
           </div>
         </div>
       </footer>

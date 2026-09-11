@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   ChevronDown, 
   ChevronUp, 
@@ -20,7 +20,7 @@ import {
   Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import FixedQuizTaker from './FixedQuizTaker';
+import QuizTaker from './QuizTaker';
 import { api } from '../services/api';
 
 const EntitySection = ({ entities }) => {
@@ -117,7 +117,7 @@ const RelatedTopicsSection = ({ topics }) => {
   );
 };
 
-const AttemptsHistory = ({ attempts, quiz, onViewAttempt }) => {
+const AttemptsHistory = ({ attempts, onViewAttempt }) => {
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -204,7 +204,7 @@ const AttemptsHistory = ({ attempts, quiz, onViewAttempt }) => {
   );
 };
 
-const FixedEnhancedQuizCard = ({ quiz, mode = 'view', onModeChange }) => {
+const QuizCard = ({ quiz, mode = 'view', onModeChange }) => {
   const [activeSection, setActiveSection] = useState(mode === 'take' ? 'quiz' : 'overview');
   const [attempts, setAttempts] = useState([]);
   const [loadingAttempts, setLoadingAttempts] = useState(false);
@@ -215,7 +215,7 @@ const FixedEnhancedQuizCard = ({ quiz, mode = 'view', onModeChange }) => {
     if (quiz?.id) {
       loadAttempts();
     }
-  }, [quiz?.id]);
+  }, [quiz?.id, loadAttempts]);
 
   useEffect(() => {
     setViewMode(mode);
@@ -226,7 +226,8 @@ const FixedEnhancedQuizCard = ({ quiz, mode = 'view', onModeChange }) => {
     }
   }, [mode]);
 
-  const loadAttempts = async () => {
+  const loadAttempts = useCallback(async () => {
+    if (!quiz?.id) return;
     setLoadingAttempts(true);
     try {
       const attemptsData = await api.getQuizAttempts(quiz.id);
@@ -237,7 +238,7 @@ const FixedEnhancedQuizCard = ({ quiz, mode = 'view', onModeChange }) => {
     } finally {
       setLoadingAttempts(false);
     }
-  };
+  }, [quiz?.id]);
 
   const handleQuizComplete = (result) => {
     loadAttempts();
@@ -496,7 +497,7 @@ const FixedEnhancedQuizCard = ({ quiz, mode = 'view', onModeChange }) => {
             exit={{ opacity: 0, x: 20 }}
             transition={{ duration: 0.3 }}
           >
-            <FixedQuizTaker 
+            <QuizTaker 
               quiz={quiz} 
               onQuizComplete={handleQuizComplete}
               onExit={handleExitReview}
@@ -540,7 +541,7 @@ const FixedEnhancedQuizCard = ({ quiz, mode = 'view', onModeChange }) => {
             exit={{ opacity: 0, x: 20 }}
             transition={{ duration: 0.3 }}
           >
-            <FixedQuizTaker 
+            <QuizTaker 
               quiz={quiz} 
               showResults={true}
               attemptData={selectedAttempt}
@@ -553,4 +554,4 @@ const FixedEnhancedQuizCard = ({ quiz, mode = 'view', onModeChange }) => {
   );
 };
 
-export default FixedEnhancedQuizCard;
+export default QuizCard;

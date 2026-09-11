@@ -1,4 +1,12 @@
 venv/
 __pycache__/
+*.pyc
 .env
 *.db
+.pytest_cache/
+.coverage
+htmlcov/
+node_modules/
+dist/
+.DS_Store
+*.log

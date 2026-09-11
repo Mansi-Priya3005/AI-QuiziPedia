@@ -1,17 +1,11 @@
-import os
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON, ForeignKey, Float
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON, ForeignKey, Float, UniqueConstraint, Index
+from sqlalchemy.orm import sessionmaker, relationship, declarative_base
+from datetime import datetime, timezone
 import json
-from dotenv import load_dotenv
 
-load_dotenv()
+from config import settings
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is required")
+DATABASE_URL = settings.database_url
 
 engine = create_engine(
     DATABASE_URL,
@@ -31,11 +25,14 @@ Base = declarative_base()
 
 class Quiz(Base):
     __tablename__ = "quizzes"
-    
+    __table_args__ = (
+        UniqueConstraint("url", name="uq_quizzes_url"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    url = Column(String, nullable=False)
+    url = Column(String, nullable=False, index=True)
     title = Column(String, nullable=False)
-    date_generated = Column(DateTime, default=datetime.utcnow)
+    date_generated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     scraped_content = Column(Text)
     full_quiz_data = Column(Text)
     attempts = relationship("QuizAttempt", back_populates="quiz", cascade="all, delete-orphan")
@@ -48,29 +45,32 @@ class Quiz(Base):
 
 class QuizAttempt(Base):
     __tablename__ = "quiz_attempts"
-    
+    __table_args__ = (
+        Index("ix_quiz_attempts_quiz_id_date", "quiz_id", "date_attempted"),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
-    quiz_id = Column(Integer, ForeignKey("quizzes.id"))
+    quiz_id = Column(Integer, ForeignKey("quizzes.id", ondelete="CASCADE"), nullable=False, index=True)
     score = Column(Float, nullable=False)
     correct_answers = Column(Integer, nullable=False)
     total_questions = Column(Integer, nullable=False)
     user_answers = Column(JSON, nullable=False)
     time_taken = Column(Integer, default=0)
-    date_attempted = Column(DateTime, default=datetime.utcnow)
+    date_attempted = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     quiz = relationship("Quiz", back_populates="attempts")
 
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    print(f"Failed to create tables: {e}")
+# NOTE: Schema is managed by Alembic migrations (see backend/alembic/), not by
+# create_all() at import time. Import-time table creation silently swallowed
+# errors and made schema changes impossible to track or roll back safely.
+# Run `alembic upgrade head` before starting the app (handled by
+# docker-entrypoint.sh / the CI deploy step).
 
 def get_db():
     db = SessionLocal()
     try:
         yield db
-    except Exception as e:
-        print(f"Database session error: {e}")
+    except Exception:
         db.rollback()
         raise
     finally:

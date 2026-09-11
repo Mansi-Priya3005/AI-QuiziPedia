@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Search, 
   Filter,
@@ -9,7 +9,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../services/api';
 import EnhancedModal from '../components/EnhancedModal';
-import FixedEnhancedQuizCard from '../components/FixedEnhancedQuizCard';
+import QuizCard from '../components/QuizCard';
 import QuizHistoryCard from '../components/QuizHistoryCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -29,7 +29,7 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
 
   useEffect(() => {
     filterAndSortQuizzes();
-  }, [quizzes, searchTerm, sortBy]);
+  }, [filterAndSortQuizzes]);
 
   const loadHistory = async () => {
     setLoading(true);
@@ -43,7 +43,7 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
     }
   };
 
-  const filterAndSortQuizzes = () => {
+  const filterAndSortQuizzes = useCallback(() => {
     let filtered = quizzes.filter(quiz =>
       quiz.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       quiz.url.toLowerCase().includes(searchTerm.toLowerCase())
@@ -65,7 +65,7 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
     });
 
     setFilteredQuizzes(filtered);
-  };
+  }, [quizzes, searchTerm, sortBy]);
 
   const handleViewDetails = async (quiz) => {
     try {
@@ -218,7 +218,7 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
           className="space-y-6"
         >
           <AnimatePresence>
-            {filteredQuizzes.map((quiz, index) => (
+            {filteredQuizzes.map((quiz) => (
               <QuizHistoryCard
                 key={quiz.id}
                 quiz={quiz}
@@ -265,7 +265,7 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
       >
         {selectedQuiz && (
           <div className="p-4">
-            <FixedEnhancedQuizCard 
+            <QuizCard 
               quiz={selectedQuiz} 
               mode={viewMode === 'take' ? 'take' : 'view'}
               onModeChange={(newMode) => {

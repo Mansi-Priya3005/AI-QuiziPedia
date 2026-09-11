@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../services/api';
-import FixedEnhancedQuizCard from '../components/FixedEnhancedQuizCard';
+import QuizCard from '../components/QuizCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const EnhancedGenerateQuizTab = () => {
@@ -137,7 +137,7 @@ const EnhancedGenerateQuizTab = () => {
               </form>
 
               <div className="mt-8 pt-6 border-t border-gray-200">
-                <h3 className="font-semibold text-gray-900 mb-4">What you'll get:</h3>
+                <h3 className="font-semibold text-gray-900 mb-4">What you&apos;ll get:</h3>
                 <div className="space-y-3">
                   {[
                     '5-10 AI-generated questions',
@@ -201,7 +201,7 @@ const EnhancedGenerateQuizTab = () => {
                       Create New Quiz
                     </button>
                   </div>
-                  <FixedEnhancedQuizCard quiz={quiz} mode="view" />
+                  <QuizCard quiz={quiz} mode="view" />
                 </motion.div>
               )}
 
