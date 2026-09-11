@@ -16,7 +16,7 @@ from models import QuizOutput
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-3.6-flash"
 MAX_ARTICLE_CHARS = 12000  # ~ a few thousand tokens, well within context
 
 
