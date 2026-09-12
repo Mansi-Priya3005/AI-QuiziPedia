@@ -15,6 +15,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 
 const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
   const [quizzes, setQuizzes] = useState([]);
+  const [totalQuizzes, setTotalQuizzes] = useState(0);
   const [filteredQuizzes, setFilteredQuizzes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedQuiz, setSelectedQuiz] = useState(null);
@@ -26,8 +27,12 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
   const loadHistory = async () => {
     setLoading(true);
     try {
+      // GET /quizzes now returns a paginated envelope
+      // ({items, total, limit, offset}) instead of a bare array, so it
+      // must be unwrapped here rather than treated as the list directly.
       const history = await api.getQuizHistory();
-      setQuizzes(history);
+      setQuizzes(history.items || []);
+      setTotalQuizzes(history.total ?? (history.items || []).length);
     } catch (err) {
       console.error('Failed to load history:', err);
     } finally {
@@ -129,7 +134,7 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
           {[
             { 
               label: 'Total Quizzes', 
-              value: quizzes.length, 
+              value: totalQuizzes, 
               icon: BarChart3, 
               color: 'blue' 
             },
