@@ -291,3 +291,72 @@ def test_quiz_history_only_shows_own_quizzes(client, sample_quiz_output):
 def test_get_nonexistent_quiz_returns_404(client, auth_headers):
     r = client.get("/quizzes/999999", headers=auth_headers)
     assert r.status_code == 404
+
+
+def test_generate_quiz_from_file_requires_auth(client):
+    r = client.post(
+        "/generate-quiz-from-file",
+        files={"file": ("notes.txt", b"some content", "text/plain")},
+    )
+    assert r.status_code == 401
+
+
+def test_generate_quiz_from_text_file_happy_path(client, auth_headers, sample_quiz_output):
+    with patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ):
+        r = client.post(
+            "/generate-quiz-from-file",
+            files={"file": ("notes.txt", b"Photosynthesis converts light into energy.", "text/plain")},
+            headers=auth_headers,
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source_type"] == "upload"
+    assert body["url"] is None
+    assert body["title"] == "notes.txt"
+
+
+def test_generate_quiz_from_file_rejects_unsupported_type(client, auth_headers):
+    r = client.post(
+        "/generate-quiz-from-file",
+        files={"file": ("image.png", b"fake-image-bytes", "image/png")},
+        headers=auth_headers,
+    )
+    assert r.status_code == 400
+    assert "Unsupported file type" in r.json()["detail"]
+
+
+def test_generate_quiz_from_file_ai_failure_returns_502(client, auth_headers):
+    with patch.object(
+        __import__("main").quiz_generator,
+        "generate_quiz",
+        side_effect=QuizGenerationError("model failed"),
+    ):
+        r = client.post(
+            "/generate-quiz-from-file",
+            files={"file": ("notes.txt", b"Some study notes content here.", "text/plain")},
+            headers=auth_headers,
+        )
+    assert r.status_code == 502
+    assert client.get("/quizzes", headers=auth_headers).json()["total"] == 0
+
+
+def test_multiple_uploads_do_not_collide(client, auth_headers, sample_quiz_output):
+    """Unlike Wikipedia URLs, uploads have no dedup key -- each upload
+    creates its own quiz even with the same filename."""
+    with patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ):
+        r1 = client.post(
+            "/generate-quiz-from-file",
+            files={"file": ("notes.txt", b"First set of notes.", "text/plain")},
+            headers=auth_headers,
+        )
+        r2 = client.post(
+            "/generate-quiz-from-file",
+            files={"file": ("notes.txt", b"Second set of notes.", "text/plain")},
+            headers=auth_headers,
+        )
+    assert r1.json()["id"] != r2.json()["id"]
+    assert client.get("/quizzes", headers=auth_headers).json()["total"] == 2

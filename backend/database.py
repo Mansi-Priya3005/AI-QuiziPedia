@@ -40,13 +40,18 @@ class Quiz(Base):
     __table_args__ = (
         # Each user gets their own copy of a quiz for a given URL, rather
         # than one global quiz shared across all users -- so uniqueness is
-        # scoped per-owner, not global.
+        # scoped per-owner, not global. Uploaded documents have url=NULL,
+        # and Postgres treats NULLs as distinct for uniqueness purposes,
+        # so multiple uploads never collide with each other here.
         UniqueConstraint("owner_id", "url", name="uq_quizzes_owner_url"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    url = Column(String, nullable=False, index=True)
+    # Nullable: a quiz generated from an uploaded document has no source
+    # URL. source_type distinguishes how to interpret this row.
+    url = Column(String, nullable=True, index=True)
+    source_type = Column(String, nullable=False, default="wikipedia", server_default="wikipedia")
     title = Column(String, nullable=False)
     date_generated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     scraped_content = Column(Text)

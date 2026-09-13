@@ -1,7 +1,7 @@
 import json
 import logging
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -15,6 +15,7 @@ import schemas
 from auth import create_access_token, get_current_user, hash_password, verify_password
 from config import settings
 from database import Quiz, QuizAttempt, User, get_db
+from document_extractor import DocumentExtractionError, extract_text_from_upload
 from llm_quiz_generator import QuizGenerationError, QuizGenerator
 from scraper import ScrapeError, scrape_wikipedia, validate_wikipedia_url
 
@@ -54,6 +55,7 @@ def _quiz_to_response_dict(quiz: Quiz) -> dict:
     return {
         "id": quiz.id,
         "url": quiz.url,
+        "source_type": quiz.source_type,
         "title": quiz.title,
         "summary": quiz_data.get("summary", ""),
         "key_entities": quiz_data.get("key_entities", {}),
@@ -160,6 +162,7 @@ async def generate_quiz(
     db_quiz = Quiz(
         owner_id=current_user.id,
         url=quiz_request.url,
+        source_type="wikipedia",
         title=title or "Unknown Title",
         scraped_content=article_text,
     )
@@ -187,6 +190,51 @@ async def generate_quiz(
             detail="A quiz for this URL is already being generated. Please retry.",
         )
 
+    db.refresh(db_quiz)
+    return _quiz_to_response_dict(db_quiz)
+
+
+@app.post("/generate-quiz-from-file", response_model=schemas.QuizResponse)
+@limiter.limit(settings.generate_quiz_rate_limit)
+async def generate_quiz_from_file(
+    request: Request,  # required by slowapi's limiter decorator
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    file_bytes = await file.read()
+
+    try:
+        document_text = extract_text_from_upload(
+            filename=file.filename or "upload",
+            content_type=file.content_type or "",
+            file_bytes=file_bytes,
+        )
+    except DocumentExtractionError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    try:
+        quiz_data = quiz_generator.generate_quiz(document_text)
+    except QuizGenerationError as e:
+        logger.error("Quiz generation failed for uploaded file %s: %s", file.filename, e)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The AI service failed to generate a quiz for this document. Please try again.",
+        )
+
+    # Uploads have no URL, so there's no natural dedup key -- every upload
+    # creates a new quiz (unlike Wikipedia URLs, which dedupe per user).
+    db_quiz = Quiz(
+        owner_id=current_user.id,
+        url=None,
+        source_type="upload",
+        title=file.filename or "Uploaded document",
+        scraped_content=document_text,
+    )
+    db_quiz.set_quiz_data(quiz_data.model_dump())
+
+    db.add(db_quiz)
+    db.commit()
     db.refresh(db_quiz)
     return _quiz_to_response_dict(db_quiz)
 
@@ -351,6 +399,7 @@ def get_quiz_history(
         {
             "id": quiz.id,
             "url": quiz.url,
+            "source_type": quiz.source_type,
             "title": quiz.title,
             "date_generated": quiz.date_generated,
             "attempts_count": attempts_count,

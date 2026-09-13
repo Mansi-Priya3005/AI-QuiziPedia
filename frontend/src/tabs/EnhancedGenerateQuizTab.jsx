@@ -5,23 +5,45 @@ import {
   Sparkles, 
   CheckCircle2,
   AlertCircle,
-  Wand2
+  Wand2,
+  Link as LinkIcon,
+  FileUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../services/api';
 import QuizCard from '../components/QuizCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const ACCEPTED_FILE_TYPES = '.pdf,.txt,application/pdf,text/plain';
+
 const EnhancedGenerateQuizTab = () => {
+  const [sourceMode, setSourceMode] = useState('url'); // 'url' | 'file'
   const [url, setUrl] = useState('');
+  const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [quiz, setQuiz] = useState(null);
   const [step, setStep] = useState('input');
 
   const validateUrl = (url) => {
-    const wikipediaRegex = /^https:\/\/[a-z]{2,3}\.wikipedia\.org\/wiki\/[^/]+$/;
+    const wikipediaRegex = /^https:\/\/[a-z]{2,12}\.wikipedia\.org\/wiki\/[^/]+$/;
     return wikipediaRegex.test(url);
+  };
+
+  const handleFileChange = (e) => {
+    const selected = e.target.files?.[0];
+    setError('');
+    if (!selected) {
+      setFile(null);
+      return;
+    }
+    if (selected.size > MAX_FILE_SIZE_BYTES) {
+      setError('File is too large (max 10 MB).');
+      setFile(null);
+      return;
+    }
+    setFile(selected);
   };
 
   const handleSubmit = async (e) => {
@@ -32,11 +54,18 @@ const EnhancedGenerateQuizTab = () => {
     setStep('generating');
 
     try {
-      if (!validateUrl(url)) {
-        throw new Error('Please enter a valid Wikipedia URL (e.g., https://en.wikipedia.org/wiki/Artificial_intelligence)');
+      let quizData;
+      if (sourceMode === 'file') {
+        if (!file) {
+          throw new Error('Please choose a PDF or .txt file to upload.');
+        }
+        quizData = await api.generateQuizFromFile(file);
+      } else {
+        if (!validateUrl(url)) {
+          throw new Error('Please enter a valid Wikipedia URL (e.g., https://en.wikipedia.org/wiki/Artificial_intelligence)');
+        }
+        quizData = await api.generateQuiz(url);
       }
-
-      const quizData = await api.generateQuiz(url);
       setQuiz(quizData);
       setStep('result');
     } catch (err) {
@@ -49,10 +78,13 @@ const EnhancedGenerateQuizTab = () => {
 
   const resetForm = () => {
     setUrl('');
+    setFile(null);
     setQuiz(null);
     setStep('input');
     setError('');
   };
+
+  const canSubmit = sourceMode === 'file' ? !!file : !!url.trim();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-8">
@@ -88,27 +120,69 @@ const EnhancedGenerateQuizTab = () => {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-2">
-                    Wikipedia Article URL
-                  </label>
-                  <input
-                    type="url"
-                    id="url"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    placeholder="https://en.wikipedia.org/wiki/..."
-                    className="input-field"
-                    disabled={loading}
-                  />
-                  <p className="text-xs text-gray-500 mt-2">
-                    Example: https://en.wikipedia.org/wiki/Artificial_intelligence
-                  </p>
+                <div className="flex bg-gray-100 rounded-xl p-1">
+                  <button
+                    type="button"
+                    onClick={() => { setSourceMode('url'); setError(''); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      sourceMode === 'url' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
+                    }`}
+                  >
+                    <LinkIcon size={16} />
+                    Wikipedia URL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSourceMode('file'); setError(''); }}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      sourceMode === 'file' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'
+                    }`}
+                  >
+                    <FileUp size={16} />
+                    Upload File
+                  </button>
                 </div>
+
+                {sourceMode === 'url' ? (
+                  <div>
+                    <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-2">
+                      Wikipedia Article URL
+                    </label>
+                    <input
+                      type="url"
+                      id="url"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      placeholder="https://en.wikipedia.org/wiki/..."
+                      className="input-field"
+                      disabled={loading}
+                    />
+                    <p className="text-xs text-gray-500 mt-2">
+                      Example: https://en.wikipedia.org/wiki/Artificial_intelligence
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label htmlFor="file" className="block text-sm font-medium text-gray-700 mb-2">
+                      PDF or text file
+                    </label>
+                    <input
+                      type="file"
+                      id="file"
+                      accept={ACCEPTED_FILE_TYPES}
+                      onChange={handleFileChange}
+                      className="input-field file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-primary-50 file:text-primary-700 file:text-sm file:font-medium"
+                      disabled={loading}
+                    />
+                    <p className="text-xs text-gray-500 mt-2">
+                      PDF or .txt, up to 10 MB. Scanned/image-only PDFs aren&apos;t supported yet.
+                    </p>
+                  </div>
+                )}
 
                 <button
                   type="submit"
-                  disabled={loading || !url.trim()}
+                  disabled={loading || !canSubmit}
                   className="btn-primary w-full flex items-center justify-center space-x-2"
                 >
                   {loading ? (

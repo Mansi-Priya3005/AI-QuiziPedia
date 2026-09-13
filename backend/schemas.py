@@ -35,7 +35,8 @@ class QuizRequest(BaseModel):
 
 class QuizResponse(BaseModel):
     id: int
-    url: str
+    url: Optional[str] = None
+    source_type: str = "wikipedia"
     title: str
     summary: str
     key_entities: dict
@@ -46,7 +47,8 @@ class QuizResponse(BaseModel):
 
 class QuizHistory(BaseModel):
     id: int
-    url: str
+    url: Optional[str] = None
+    source_type: str = "wikipedia"
     title: str
     date_generated: datetime
     attempts_count: int

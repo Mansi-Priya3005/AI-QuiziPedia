@@ -319,15 +319,17 @@ const QuizCard = ({ quiz, mode = 'view', onModeChange }) => {
             </div>
             
             <div className="flex flex-col gap-3">
-              <a
-                href={quiz.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-secondary flex items-center justify-center space-x-2"
-              >
-                <ExternalLink size={16} />
-                <span>View Article</span>
-              </a>
+              {quiz.url && (
+                <a
+                  href={quiz.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-secondary flex items-center justify-center space-x-2"
+                >
+                  <ExternalLink size={16} />
+                  <span>View Article</span>
+                </a>
+              )}
               <button
                 onClick={handleStartQuiz}
                 className="btn-primary flex items-center justify-center space-x-2"

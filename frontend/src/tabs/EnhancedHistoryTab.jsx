@@ -43,7 +43,7 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
   const filterAndSortQuizzes = useCallback(() => {
     let filtered = quizzes.filter(quiz =>
       quiz.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      quiz.url.toLowerCase().includes(searchTerm.toLowerCase())
+      (quiz.url || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     filtered.sort((a, b) => {

@@ -97,6 +97,38 @@ class ApiService {
     });
   }
 
+  async generateQuizFromFile(file) {
+    // multipart/form-data upload -- deliberately NOT setting a
+    // Content-Type header here; the browser sets it automatically with
+    // the correct multipart boundary, and overriding it manually breaks
+    // the upload.
+    const token = this.getToken();
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${this.baseURL}/generate-quiz-from-file`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { detail: errorText || `HTTP ${response.status}` };
+      }
+      if (response.status === 401 && this.onUnauthorized) {
+        this.onUnauthorized();
+      }
+      throw new Error(errorData.detail || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  }
+
   async submitQuizAttempt(quizId, attemptData) {
     return this.request(`/quizzes/${quizId}/attempt`, {
       method: 'POST',

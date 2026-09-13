@@ -41,7 +41,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov anyio
+          pip install -r requirements-dev.txt
 
       - name: Apply migrations
         working-directory: backend

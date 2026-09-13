@@ -38,7 +38,7 @@ const QuizHistoryCard = ({ quiz, onViewDetails, onTakeQuiz }) => {
           </div>
           
           <p className="text-gray-600 text-sm mb-4 line-clamp-2">
-            {quiz.url}
+            {quiz.source_type === 'upload' ? 'Uploaded document' : quiz.url}
           </p>
           
           <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
@@ -77,15 +77,17 @@ const QuizHistoryCard = ({ quiz, onViewDetails, onTakeQuiz }) => {
             </button>
           </div>
           
-          <a
-            href={quiz.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center space-x-1 text-xs text-gray-500 hover:text-primary-600 transition-colors"
-          >
-            <ExternalLink size={12} />
-            <span>View Article</span>
-          </a>
+          {quiz.url && (
+            <a
+              href={quiz.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center space-x-1 text-xs text-gray-500 hover:text-primary-600 transition-colors"
+            >
+              <ExternalLink size={12} />
+              <span>View Article</span>
+            </a>
+          )}
         </div>
       </div>
     </motion.div>
