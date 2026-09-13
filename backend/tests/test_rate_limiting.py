@@ -34,6 +34,12 @@ def test_generate_quiz_rate_limit_returns_429(monkeypatch, sample_quiz_output):
     main_module.app.dependency_overrides[get_db] = override_get_db
     test_client = TestClient(main_module.app)
 
+    signup_resp = test_client.post(
+        "/auth/signup",
+        json={"email": "ratelimit@example.com", "password": "password123"},
+    )
+    auth_headers = {"Authorization": f"Bearer {signup_resp.json()['access_token']}"}
+
     with patch(
         "main.scrape_wikipedia",
         new=AsyncMock(return_value=("text", "T")),
@@ -45,6 +51,7 @@ def test_generate_quiz_rate_limit_returns_429(monkeypatch, sample_quiz_output):
             r = test_client.post(
                 "/generate-quiz",
                 json={"url": f"https://en.wikipedia.org/wiki/Rate_Limit_Test_{i}"},
+                headers=auth_headers,
             )
             statuses.append(r.status_code)
 

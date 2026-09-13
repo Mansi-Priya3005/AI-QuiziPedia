@@ -73,3 +73,39 @@ class QuizAttemptResponse(BaseModel):
     time_taken: int
     date_attempted: datetime
     answers: List[str]
+
+
+class UserSignup(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    # bcrypt silently truncates/ignores bytes beyond 72 -- capping the
+    # input length here means what the user typed is actually what gets
+    # checked, rather than a password that "works" up to 72 characters
+    # and silently stops mattering after that.
+    password: str = Field(min_length=8, max_length=72)
+
+    @field_validator("email")
+    @classmethod
+    def basic_email_shape(cls, v: str) -> str:
+        # Deliberately not a full RFC 5322 validator -- just enough to
+        # catch obvious typos ("not an email") without rejecting valid
+        # addresses that stricter regexes often get wrong.
+        if "@" not in v or " " in v or v.startswith("@") or v.endswith("@"):
+            raise ValueError("must be a valid email address")
+        return v.lower().strip()
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    created_at: datetime
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse

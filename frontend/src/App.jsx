@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Brain, Sparkles, History, Home, Menu, X } from 'lucide-react';
+import { Brain, Sparkles, History, Home, Menu, X, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Hero from './components/Hero';
+import AuthScreen from './components/AuthScreen';
+import LoadingSpinner from './components/LoadingSpinner';
 import EnhancedGenerateQuizTab from './tabs/EnhancedGenerateQuizTab';
 import EnhancedHistoryTab from './tabs/EnhancedHistoryTab';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
 import './index.css';
 
-function App() {
+function AppShell() {
+  const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('home');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -109,6 +114,20 @@ function App() {
               })}
             </nav>
 
+            <div className="hidden md:flex items-center space-x-3">
+              <span className="text-sm text-gray-500 truncate max-w-[160px]" title={user?.email}>
+                {user?.email}
+              </span>
+              <button
+                onClick={logout}
+                className="flex items-center space-x-2 px-4 py-2 rounded-xl text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-all duration-200"
+                title="Log out"
+              >
+                <LogOut size={18} />
+                <span className="font-medium">Log out</span>
+              </button>
+            </div>
+
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="md:hidden p-2 rounded-xl bg-white/80 backdrop-blur-sm border border-gray-200 shadow-sm"
@@ -144,6 +163,16 @@ function App() {
                       </button>
                     );
                   })}
+                  <div className="border-t border-gray-100 mt-1 pt-1">
+                    <div className="px-6 py-2 text-sm text-gray-500 truncate">{user?.email}</div>
+                    <button
+                      onClick={logout}
+                      className="flex items-center space-x-3 w-full px-6 py-4 text-left text-gray-700 hover:bg-gray-50 transition-all duration-200"
+                    >
+                      <LogOut size={20} />
+                      <span className="font-medium">Log out</span>
+                    </button>
+                  </div>
                 </div>
               </motion.nav>
             )}
@@ -254,6 +283,32 @@ function App() {
       </footer>
     </div>
   );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
+  );
+}
+
+function AuthGate() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center">
+        <LoadingSpinner size="xl" text="Loading..." />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <AuthScreen />;
+  }
+
+  return <AppShell />;
 }
 
 export default App;

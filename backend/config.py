@@ -16,6 +16,16 @@ class Settings(BaseSettings):
     # unthrottled — anyone could trigger unlimited Gemini calls.
     generate_quiz_rate_limit: str = "10/minute"
 
+    # Rate limiting for auth endpoints, to slow down credential-stuffing /
+    # brute-force attempts and signup spam.
+    auth_rate_limit: str = "5/minute"
+
+    # JWT signing. No default for the secret -- an app with a guessable or
+    # shared-across-deployments default secret can have its tokens forged.
+    jwt_secret_key: str
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]

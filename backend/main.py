@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 from typing import List
 
 import schemas
+from auth import create_access_token, get_current_user, hash_password, verify_password
 from config import settings
-from database import Quiz, QuizAttempt, get_db
+from database import Quiz, QuizAttempt, User, get_db
 from llm_quiz_generator import QuizGenerationError, QuizGenerator
 from scraper import ScrapeError, scrape_wikipedia, validate_wikipedia_url
 
@@ -67,12 +68,61 @@ def read_root():
     return {"message": "AI Wiki Quiz Generator API"}
 
 
+@app.post("/auth/signup", response_model=schemas.Token, status_code=status.HTTP_201_CREATED)
+@limiter.limit(settings.auth_rate_limit)
+def signup(request: Request, signup_data: schemas.UserSignup, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == signup_data.email).first()
+    if existing:
+        # Deliberately vague rather than "email already registered" --
+        # confirming which emails have accounts is a minor enumeration
+        # leak best avoided even for a portfolio-scale app.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Could not create account with these details",
+        )
+
+    user = User(email=signup_data.email, hashed_password=hash_password(signup_data.password))
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Could not create account with these details",
+        )
+    db.refresh(user)
+
+    token = create_access_token(user.id)
+    return {"access_token": token, "user": user}
+
+
+@app.post("/auth/login", response_model=schemas.Token)
+@limiter.limit(settings.auth_rate_limit)
+def login(request: Request, login_data: schemas.UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == login_data.email.lower().strip()).first()
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+        )
+
+    token = create_access_token(user.id)
+    return {"access_token": token, "user": user}
+
+
+@app.get("/auth/me", response_model=schemas.UserResponse)
+def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
 @app.post("/generate-quiz", response_model=schemas.QuizResponse)
 @limiter.limit(settings.generate_quiz_rate_limit)
 async def generate_quiz(
     request: Request,  # required by slowapi's limiter decorator
     quiz_request: schemas.QuizRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     # schemas.QuizRequest already validates this is a Wikipedia URL, but
     # validate_wikipedia_url is kept as a second explicit check since it's
@@ -83,7 +133,11 @@ async def generate_quiz(
             detail="Invalid Wikipedia URL",
         )
 
-    existing_quiz = db.query(Quiz).filter(Quiz.url == quiz_request.url).first()
+    existing_quiz = (
+        db.query(Quiz)
+        .filter(Quiz.url == quiz_request.url, Quiz.owner_id == current_user.id)
+        .first()
+    )
     if existing_quiz:
         return _quiz_to_response_dict(existing_quiz)
 
@@ -104,6 +158,7 @@ async def generate_quiz(
         )
 
     db_quiz = Quiz(
+        owner_id=current_user.id,
         url=quiz_request.url,
         title=title or "Unknown Title",
         scraped_content=article_text,
@@ -114,13 +169,17 @@ async def generate_quiz(
     try:
         db.commit()
     except IntegrityError:
-        # Two concurrent requests for the same URL can both pass the
-        # existing_quiz check above and both try to insert — the unique
-        # constraint on Quiz.url is the real guard, this just turns the
-        # resulting race into "return the quiz the other request created"
-        # instead of a raw 500.
+        # Two concurrent requests for the same (user, URL) pair can both
+        # pass the existing_quiz check above and both try to insert — the
+        # unique constraint on (owner_id, url) is the real guard, this
+        # just turns the resulting race into "return the quiz the other
+        # request created" instead of a raw 500.
         db.rollback()
-        existing_quiz = db.query(Quiz).filter(Quiz.url == quiz_request.url).first()
+        existing_quiz = (
+            db.query(Quiz)
+            .filter(Quiz.url == quiz_request.url, Quiz.owner_id == current_user.id)
+            .first()
+        )
         if existing_quiz:
             return _quiz_to_response_dict(existing_quiz)
         raise HTTPException(
@@ -137,8 +196,16 @@ def submit_quiz_attempt(
     quiz_id: int,
     attempt_data: schemas.QuizAttemptCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+    # Scoping by owner_id here (not just id) means requesting someone
+    # else's quiz_id returns 404, not 403 -- it doesn't confirm the quiz
+    # exists at all to a user who doesn't own it.
+    quiz = (
+        db.query(Quiz)
+        .filter(Quiz.id == quiz_id, Quiz.owner_id == current_user.id)
+        .first()
+    )
     if not quiz:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -174,6 +241,7 @@ def submit_quiz_attempt(
 
     attempt = QuizAttempt(
         quiz_id=quiz_id,
+        user_id=current_user.id,
         score=score_percentage,
         correct_answers=correct_answers,
         total_questions=total_questions,
@@ -197,7 +265,21 @@ def submit_quiz_attempt(
 
 
 @app.get("/quizzes/{quiz_id}/attempts", response_model=List[schemas.QuizAttemptResponse])
-def get_quiz_attempts(quiz_id: int, db: Session = Depends(get_db)):
+def get_quiz_attempts(
+    quiz_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Verify ownership first so this doesn't leak whether a quiz_id
+    # belonging to another user exists.
+    quiz = (
+        db.query(Quiz)
+        .filter(Quiz.id == quiz_id, Quiz.owner_id == current_user.id)
+        .first()
+    )
+    if not quiz:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quiz not found")
+
     attempts = (
         db.query(QuizAttempt)
         .filter(QuizAttempt.quiz_id == quiz_id)
@@ -234,13 +316,16 @@ def get_quiz_attempts(quiz_id: int, db: Session = Depends(get_db)):
 @app.get("/quizzes", response_model=schemas.PaginatedQuizHistory)
 def get_quiz_history(
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     limit: int = 20,
     offset: int = 0,
 ):
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
 
-    total = db.query(func.count(Quiz.id)).scalar()
+    total = (
+        db.query(func.count(Quiz.id)).filter(Quiz.owner_id == current_user.id).scalar()
+    )
 
     # Single aggregated query (LEFT JOIN + GROUP BY) instead of the
     # previous N+1 pattern (one extra query per quiz to fetch its
@@ -254,6 +339,7 @@ def get_quiz_history(
             func.max(QuizAttempt.score).label("best_score"),
         )
         .outerjoin(QuizAttempt, QuizAttempt.quiz_id == Quiz.id)
+        .filter(Quiz.owner_id == current_user.id)
         .group_by(Quiz.id)
         .order_by(Quiz.date_generated.desc())
         .limit(limit)
@@ -277,8 +363,16 @@ def get_quiz_history(
 
 
 @app.get("/quizzes/{quiz_id}", response_model=schemas.QuizResponse)
-def get_quiz(quiz_id: int, db: Session = Depends(get_db)):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+def get_quiz(
+    quiz_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    quiz = (
+        db.query(Quiz)
+        .filter(Quiz.id == quiz_id, Quiz.owner_id == current_user.id)
+        .first()
+    )
     if not quiz:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

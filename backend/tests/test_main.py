@@ -15,12 +15,28 @@ def test_health_check_reports_db_connected(client):
     assert r.json()["status"] == "healthy"
 
 
-def test_generate_quiz_rejects_non_wikipedia_url(client):
-    r = client.post("/generate-quiz", json={"url": "https://example.com/not-wiki"})
+def test_generate_quiz_requires_auth(client):
+    r = client.post(
+        "/generate-quiz", json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"}
+    )
+    assert r.status_code == 401
+
+
+def test_quizzes_list_requires_auth(client):
+    r = client.get("/quizzes")
+    assert r.status_code == 401
+
+
+def test_generate_quiz_rejects_non_wikipedia_url(client, auth_headers):
+    r = client.post(
+        "/generate-quiz",
+        json={"url": "https://example.com/not-wiki"},
+        headers=auth_headers,
+    )
     assert r.status_code == 422
 
 
-def test_generate_quiz_happy_path(client, sample_quiz_output):
+def test_generate_quiz_happy_path(client, auth_headers, sample_quiz_output):
     with patch(
         "main.scrape_wikipedia",
         new=AsyncMock(return_value=("article text", "Ada Lovelace")),
@@ -30,6 +46,7 @@ def test_generate_quiz_happy_path(client, sample_quiz_output):
         r = client.post(
             "/generate-quiz",
             json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=auth_headers,
         )
     assert r.status_code == 200
     body = r.json()
@@ -37,7 +54,7 @@ def test_generate_quiz_happy_path(client, sample_quiz_output):
     assert len(body["quiz"]) == 5
 
 
-def test_generate_quiz_deduplicates_same_url(client, sample_quiz_output):
+def test_generate_quiz_deduplicates_same_url_for_same_user(client, auth_headers, sample_quiz_output):
     with patch(
         "main.scrape_wikipedia",
         new=AsyncMock(return_value=("article text", "Ada Lovelace")),
@@ -47,15 +64,52 @@ def test_generate_quiz_deduplicates_same_url(client, sample_quiz_output):
         r1 = client.post(
             "/generate-quiz",
             json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=auth_headers,
         )
         r2 = client.post(
             "/generate-quiz",
             json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=auth_headers,
         )
     assert r1.json()["id"] == r2.json()["id"]
 
 
-def test_generate_quiz_scrape_failure_returns_400_and_stores_nothing(client):
+def test_two_users_get_separate_quizzes_for_same_url(client, sample_quiz_output):
+    """Each user gets their own copy of a quiz, not a shared global one."""
+    user_a = client.post(
+        "/auth/signup", json={"email": "alice@example.com", "password": "password123"}
+    ).json()
+    user_b = client.post(
+        "/auth/signup", json={"email": "bob@example.com", "password": "password123"}
+    ).json()
+    headers_a = {"Authorization": f"Bearer {user_a['access_token']}"}
+    headers_b = {"Authorization": f"Bearer {user_b['access_token']}"}
+
+    with patch(
+        "main.scrape_wikipedia",
+        new=AsyncMock(return_value=("article text", "Ada Lovelace")),
+    ), patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ):
+        r_a = client.post(
+            "/generate-quiz",
+            json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=headers_a,
+        )
+        r_b = client.post(
+            "/generate-quiz",
+            json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=headers_b,
+        )
+
+    assert r_a.json()["id"] != r_b.json()["id"]
+
+    # And neither user can see the other's quiz by id
+    assert client.get(f"/quizzes/{r_a.json()['id']}", headers=headers_b).status_code == 404
+    assert client.get(f"/quizzes/{r_b.json()['id']}", headers=headers_a).status_code == 404
+
+
+def test_generate_quiz_scrape_failure_returns_400_and_stores_nothing(client, auth_headers):
     with patch(
         "main.scrape_wikipedia",
         new=AsyncMock(side_effect=ScrapeError("That Wikipedia page doesn't exist.")),
@@ -63,12 +117,13 @@ def test_generate_quiz_scrape_failure_returns_400_and_stores_nothing(client):
         r = client.post(
             "/generate-quiz",
             json={"url": "https://en.wikipedia.org/wiki/Nonexistent_Xyz"},
+            headers=auth_headers,
         )
     assert r.status_code == 400
-    assert client.get("/quizzes").json()["total"] == 0
+    assert client.get("/quizzes", headers=auth_headers).json()["total"] == 0
 
 
-def test_generate_quiz_ai_failure_returns_502_not_a_fake_quiz(client):
+def test_generate_quiz_ai_failure_returns_502_not_a_fake_quiz(client, auth_headers):
     """Regression test for the original bug: AI failures used to be
     silently stored as a fake quiz. They must now surface as an explicit
     502 and never be persisted."""
@@ -83,12 +138,13 @@ def test_generate_quiz_ai_failure_returns_502_not_a_fake_quiz(client):
         r = client.post(
             "/generate-quiz",
             json={"url": "https://en.wikipedia.org/wiki/Some_Article"},
+            headers=auth_headers,
         )
     assert r.status_code == 502
-    assert client.get("/quizzes").json()["total"] == 0
+    assert client.get("/quizzes", headers=auth_headers).json()["total"] == 0
 
 
-def test_submit_attempt_scores_correctly(client, sample_quiz_output):
+def test_submit_attempt_scores_correctly(client, auth_headers, sample_quiz_output):
     with patch(
         "main.scrape_wikipedia",
         new=AsyncMock(return_value=("article text", "Ada Lovelace")),
@@ -98,12 +154,14 @@ def test_submit_attempt_scores_correctly(client, sample_quiz_output):
         quiz = client.post(
             "/generate-quiz",
             json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=auth_headers,
         ).json()
 
     # all correct answers are "A" per sample_quiz_output
     r = client.post(
         f"/quizzes/{quiz['id']}/attempt",
         json={"answers": ["A", "A", "A", "A", "A"], "time_taken": 30},
+        headers=auth_headers,
     )
     assert r.status_code == 200
     assert r.json()["score"] == 100.0
@@ -111,11 +169,21 @@ def test_submit_attempt_scores_correctly(client, sample_quiz_output):
     r2 = client.post(
         f"/quizzes/{quiz['id']}/attempt",
         json={"answers": ["B", "A", "A", "A", "A"], "time_taken": 30},
+        headers=auth_headers,
     )
     assert r2.json()["score"] == 80.0
 
 
-def test_submit_attempt_rejects_mismatched_answer_count(client, sample_quiz_output):
+def test_cannot_submit_attempt_on_another_users_quiz(client, sample_quiz_output):
+    owner = client.post(
+        "/auth/signup", json={"email": "owner@example.com", "password": "password123"}
+    ).json()
+    intruder = client.post(
+        "/auth/signup", json={"email": "intruder@example.com", "password": "password123"}
+    ).json()
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    intruder_headers = {"Authorization": f"Bearer {intruder['access_token']}"}
+
     with patch(
         "main.scrape_wikipedia",
         new=AsyncMock(return_value=("article text", "Ada Lovelace")),
@@ -125,26 +193,50 @@ def test_submit_attempt_rejects_mismatched_answer_count(client, sample_quiz_outp
         quiz = client.post(
             "/generate-quiz",
             json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=owner_headers,
+        ).json()
+
+    r = client.post(
+        f"/quizzes/{quiz['id']}/attempt",
+        json={"answers": ["A", "A", "A", "A", "A"], "time_taken": 30},
+        headers=intruder_headers,
+    )
+    assert r.status_code == 404
+
+
+def test_submit_attempt_rejects_mismatched_answer_count(client, auth_headers, sample_quiz_output):
+    with patch(
+        "main.scrape_wikipedia",
+        new=AsyncMock(return_value=("article text", "Ada Lovelace")),
+    ), patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ):
+        quiz = client.post(
+            "/generate-quiz",
+            json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=auth_headers,
         ).json()
 
     r = client.post(
         f"/quizzes/{quiz['id']}/attempt",
         json={"answers": ["A"], "time_taken": 5},
+        headers=auth_headers,
     )
     assert r.status_code == 400
 
 
-def test_submit_attempt_rejects_too_many_answers(client):
+def test_submit_attempt_rejects_too_many_answers(client, auth_headers):
     # MAX_QUIZ_ANSWERS is 20 — this should fail schema validation before
     # ever touching the DB, regardless of whether the quiz exists.
     r = client.post(
         "/quizzes/1/attempt",
         json={"answers": ["A"] * 25, "time_taken": 5},
+        headers=auth_headers,
     )
     assert r.status_code == 422
 
 
-def test_quiz_history_pagination_and_aggregation(client, sample_quiz_output):
+def test_quiz_history_pagination_and_aggregation(client, auth_headers, sample_quiz_output):
     with patch(
         "main.scrape_wikipedia",
         new=AsyncMock(
@@ -157,18 +249,45 @@ def test_quiz_history_pagination_and_aggregation(client, sample_quiz_output):
             client.post(
                 "/generate-quiz",
                 json={"url": f"https://en.wikipedia.org/wiki/Article_{i}"},
+                headers=auth_headers,
             )
 
-    r = client.get("/quizzes?limit=2&offset=0")
+    r = client.get("/quizzes?limit=2&offset=0", headers=auth_headers)
     body = r.json()
     assert body["total"] == 3
     assert len(body["items"]) == 2
     assert body["limit"] == 2
 
-    r2 = client.get("/quizzes?limit=2&offset=2")
+    r2 = client.get("/quizzes?limit=2&offset=2", headers=auth_headers)
     assert len(r2.json()["items"]) == 1
 
 
-def test_get_nonexistent_quiz_returns_404(client):
-    r = client.get("/quizzes/999999")
+def test_quiz_history_only_shows_own_quizzes(client, sample_quiz_output):
+    user_a = client.post(
+        "/auth/signup", json={"email": "alice2@example.com", "password": "password123"}
+    ).json()
+    user_b = client.post(
+        "/auth/signup", json={"email": "bob2@example.com", "password": "password123"}
+    ).json()
+    headers_a = {"Authorization": f"Bearer {user_a['access_token']}"}
+    headers_b = {"Authorization": f"Bearer {user_b['access_token']}"}
+
+    with patch(
+        "main.scrape_wikipedia",
+        new=AsyncMock(return_value=("article text", "Some Article")),
+    ), patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ):
+        client.post(
+            "/generate-quiz",
+            json={"url": "https://en.wikipedia.org/wiki/Some_Article"},
+            headers=headers_a,
+        )
+
+    assert client.get("/quizzes", headers=headers_a).json()["total"] == 1
+    assert client.get("/quizzes", headers=headers_b).json()["total"] == 0
+
+
+def test_get_nonexistent_quiz_returns_404(client, auth_headers):
+    r = client.get("/quizzes/999999", headers=auth_headers)
     assert r.status_code == 404

@@ -4,11 +4,13 @@ os.environ.setdefault(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/quizipedia_test"
 )
 os.environ.setdefault("GEMINI_API_KEY", "test-key-for-pytest")
+os.environ.setdefault("JWT_SECRET_KEY", "test-only-jwt-secret-not-for-production")
 # Rate limiting is tested explicitly in test_rate_limiting.py with its own
 # tight limit; the default limit is set high here so the rest of the
 # suite (which legitimately calls /generate-quiz many times across many
 # tests within the same minute) doesn't flake on 429s.
 os.environ.setdefault("GENERATE_QUIZ_RATE_LIMIT", "1000/minute")
+os.environ.setdefault("AUTH_RATE_LIMIT", "1000/minute")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,7 +37,7 @@ def clean_db(db_engine):
     with db_engine.begin() as conn:
         conn.execute(
             __import__("sqlalchemy").text(
-                "TRUNCATE quiz_attempts, quizzes RESTART IDENTITY CASCADE"
+                "TRUNCATE quiz_attempts, quizzes, users RESTART IDENTITY CASCADE"
             )
         )
     yield
@@ -58,6 +60,20 @@ def client(db_engine):
     main.app.dependency_overrides[get_db] = override_get_db
     yield TestClient(main.app)
     main.app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def auth_headers(client):
+    """Signs up a fresh test user and returns Authorization headers for
+    them, for tests that need to hit protected endpoints without testing
+    auth itself."""
+    resp = client.post(
+        "/auth/signup",
+        json={"email": "quiztaker@example.com", "password": "correct-horse-battery"},
+    )
+    assert resp.status_code == 201, resp.text
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture

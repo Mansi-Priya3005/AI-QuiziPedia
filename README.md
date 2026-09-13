@@ -192,6 +192,7 @@ See `backend/.env.example` and `frontend/.env.example` for the full list. Key on
 |---|---|---|
 | `DATABASE_URL` | backend | PostgreSQL connection string |
 | `GEMINI_API_KEY` | backend | Google Gemini API key |
+| `JWT_SECRET_KEY` | backend | Random secret used to sign auth tokens (generate with `python3 -c "import secrets; print(secrets.token_hex(32))"`) |
 | `CORS_ALLOWED_ORIGINS` | backend | Comma-separated allowed frontend origins |
 | `VITE_API_BASE` | frontend | Backend URL (baked in at build time) |
 
@@ -201,7 +202,7 @@ See `backend/.env.example` and `frontend/.env.example` for the full list. Key on
 
 Documented honestly rather than glossed over:
 
-- **No authentication** — quiz history is currently global, not per-user. Anyone with a quiz ID can view or attempt it.
+- **No password reset / email verification** — signup and login work, but there's no "forgot password" flow or email confirmation yet.
 - **No caching layer** — every unique URL triggers a fresh Gemini call; no Redis/CDN caching of responses yet.
 - **Synchronous-in-process generation** — quiz generation happens inline within the HTTP request rather than via a background job queue, so a slow Gemini response holds a request open for its full duration.
 

@@ -1,35 +1,57 @@
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+const TOKEN_STORAGE_KEY = 'quizipedia_token';
 
 class ApiService {
   constructor() {
     this.baseURL = API_BASE;
+    // Called when a request comes back 401 (missing/expired/invalid
+    // token). AuthContext registers itself here so any request anywhere
+    // in the app can trigger a clean logout, not just the login form.
+    this.onUnauthorized = null;
+  }
+
+  getToken() {
+    return localStorage.getItem(TOKEN_STORAGE_KEY);
+  }
+
+  setToken(token) {
+    if (token) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    } else {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
   }
 
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`;
+    const token = this.getToken();
     const config = {
       headers: {
         'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options.headers,
       },
-      credentials: 'include',
       ...options,
     };
 
     try {
       const response = await fetch(url, config);
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`API Error ${response.status}:`, errorText);
-        
+
         let errorData;
         try {
           errorData = JSON.parse(errorText);
         } catch {
           errorData = { detail: errorText || `HTTP ${response.status}` };
         }
-        
+
+        if (response.status === 401 && this.onUnauthorized) {
+          this.onUnauthorized();
+        }
+
         throw new Error(errorData.detail || `HTTP ${response.status}`);
       }
 
@@ -40,6 +62,32 @@ class ApiService {
       console.error('❌ API request failed:', error);
       throw new Error(error.message || 'Network request failed');
     }
+  }
+
+  async signup(email, password) {
+    const result = await this.request('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    this.setToken(result.access_token);
+    return result;
+  }
+
+  async login(email, password) {
+    const result = await this.request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    this.setToken(result.access_token);
+    return result;
+  }
+
+  logout() {
+    this.setToken(null);
+  }
+
+  async getMe() {
+    return this.request('/auth/me');
   }
 
   async generateQuiz(url) {
@@ -76,10 +124,6 @@ class ApiService {
 
   async getHealth() {
     return this.request('/health');
-  }
-
-  async getEndpoints() {
-    return this.request('/endpoints');
   }
 }
 
