@@ -90,14 +90,20 @@ class ApiService {
     return this.request('/auth/me');
   }
 
-  async generateQuiz(url) {
+  async generateQuiz(url, options = {}) {
+    const { questionCount, difficulty } = options;
     return this.request('/generate-quiz', {
       method: 'POST',
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({
+        url,
+        ...(questionCount ? { question_count: questionCount } : {}),
+        ...(difficulty ? { difficulty } : {}),
+      }),
     });
   }
 
-  async generateQuizFromFile(file) {
+  async generateQuizFromFile(file, options = {}) {
+    const { questionCount, difficulty } = options;
     // multipart/form-data upload -- deliberately NOT setting a
     // Content-Type header here; the browser sets it automatically with
     // the correct multipart boundary, and overriding it manually breaks
@@ -105,6 +111,8 @@ class ApiService {
     const token = this.getToken();
     const formData = new FormData();
     formData.append('file', file);
+    if (questionCount) formData.append('question_count', String(questionCount));
+    if (difficulty) formData.append('difficulty', difficulty);
 
     const response = await fetch(`${this.baseURL}/generate-quiz-from-file`, {
       method: 'POST',

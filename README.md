@@ -7,6 +7,7 @@ An AI-powered full-stack educational web application that transforms Wikipedia a
 ### 🤖 AI-Powered Quiz Generation
 - **Instant Quiz Creation**: Convert any Wikipedia article into an interactive quiz in seconds
 - **PDF/Text Upload**: Generate a quiz from your own PDF or .txt document instead of a Wikipedia URL (up to 10 MB; scanned/image-only PDFs aren't supported yet, since that needs OCR)
+- **Configurable Difficulty & Question Count**: Choose easy/medium/hard/mixed and how many questions to generate, or leave it on auto to scale with content length (roughly 1 question per 1,500 characters, 3–40 questions)
 - **Structured, schema-validated output**: Gemini's structured output mode enforces the quiz JSON shape directly, rather than hoping the model formats free text correctly
 - **Smart Content Analysis**: Extracts key sections, entities, and related topics from the article
 - **AI-Based Explanations**: Each answer includes an explanation to improve understanding

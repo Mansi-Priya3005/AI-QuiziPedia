@@ -360,3 +360,99 @@ def test_multiple_uploads_do_not_collide(client, auth_headers, sample_quiz_outpu
         )
     assert r1.json()["id"] != r2.json()["id"]
     assert client.get("/quizzes", headers=auth_headers).json()["total"] == 2
+
+
+def test_same_url_different_question_count_creates_separate_quizzes(
+    client, auth_headers, sample_quiz_output
+):
+    """Regression test: dedup must key on the REQUESTED settings, not the
+    resolved/actual count -- otherwise a second request with explicit
+    settings either silently returns the wrong quiz or hits a spurious
+    409 (both happened during development of this feature)."""
+    with patch(
+        "main.scrape_wikipedia",
+        new=AsyncMock(return_value=("article text", "Ada Lovelace")),
+    ), patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ):
+        r1 = client.post(
+            "/generate-quiz",
+            json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace", "question_count": 10},
+            headers=auth_headers,
+        )
+        r2 = client.post(
+            "/generate-quiz",
+            json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace", "question_count": 20},
+            headers=auth_headers,
+        )
+        # Same URL, same (default) settings as r1's implicit None -- should
+        # NOT collide with r1's explicit 10, since None != 10.
+        r3 = client.post(
+            "/generate-quiz",
+            json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace"},
+            headers=auth_headers,
+        )
+
+    ids = {r1.json()["id"], r2.json()["id"], r3.json()["id"]}
+    assert len(ids) == 3
+    assert client.get("/quizzes", headers=auth_headers).json()["total"] == 3
+
+
+def test_generate_quiz_passes_question_count_and_difficulty_to_generator(
+    client, auth_headers, sample_quiz_output
+):
+    with patch(
+        "main.scrape_wikipedia",
+        new=AsyncMock(return_value=("article text", "Ada Lovelace")),
+    ), patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ) as mock_generate:
+        client.post(
+            "/generate-quiz",
+            json={
+                "url": "https://en.wikipedia.org/wiki/Ada_Lovelace",
+                "question_count": 15,
+                "difficulty": "hard",
+            },
+            headers=auth_headers,
+        )
+
+    mock_generate.assert_called_once_with(
+        "article text", question_count=15, difficulty="hard"
+    )
+
+
+def test_generate_quiz_rejects_invalid_difficulty(client, auth_headers):
+    r = client.post(
+        "/generate-quiz",
+        json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace", "difficulty": "impossible"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+
+
+def test_generate_quiz_rejects_out_of_range_question_count(client, auth_headers):
+    r = client.post(
+        "/generate-quiz",
+        json={"url": "https://en.wikipedia.org/wiki/Ada_Lovelace", "question_count": 999},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+
+
+def test_generate_quiz_from_file_passes_question_count_and_difficulty(
+    client, auth_headers, sample_quiz_output
+):
+    with patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ) as mock_generate:
+        client.post(
+            "/generate-quiz-from-file",
+            files={"file": ("notes.txt", b"Some study notes.", "text/plain")},
+            data={"question_count": "12", "difficulty": "easy"},
+            headers=auth_headers,
+        )
+
+    mock_generate.assert_called_once_with(
+        "Some study notes.", question_count=12, difficulty="easy"
+    )

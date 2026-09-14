@@ -16,11 +16,21 @@ import LoadingSpinner from '../components/LoadingSpinner';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const ACCEPTED_FILE_TYPES = '.pdf,.txt,application/pdf,text/plain';
+const DIFFICULTY_OPTIONS = [
+  { value: 'mixed', label: 'Mixed' },
+  { value: 'easy', label: 'Easy' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'hard', label: 'Hard' },
+];
+const MIN_QUESTION_COUNT = 3;
+const MAX_QUESTION_COUNT = 40;
 
 const EnhancedGenerateQuizTab = () => {
   const [sourceMode, setSourceMode] = useState('url'); // 'url' | 'file'
   const [url, setUrl] = useState('');
   const [file, setFile] = useState(null);
+  const [questionCount, setQuestionCount] = useState(''); // '' = auto (scales with content length)
+  const [difficulty, setDifficulty] = useState('mixed');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [quiz, setQuiz] = useState(null);
@@ -53,18 +63,33 @@ const EnhancedGenerateQuizTab = () => {
     setQuiz(null);
     setStep('generating');
 
+    const options = {
+      difficulty,
+      questionCount: questionCount ? Number(questionCount) : undefined,
+    };
+
+    if (
+      options.questionCount !== undefined &&
+      (options.questionCount < MIN_QUESTION_COUNT || options.questionCount > MAX_QUESTION_COUNT)
+    ) {
+      setError(`Questions must be between ${MIN_QUESTION_COUNT} and ${MAX_QUESTION_COUNT}.`);
+      setLoading(false);
+      setStep('input');
+      return;
+    }
+
     try {
       let quizData;
       if (sourceMode === 'file') {
         if (!file) {
           throw new Error('Please choose a PDF or .txt file to upload.');
         }
-        quizData = await api.generateQuizFromFile(file);
+        quizData = await api.generateQuizFromFile(file, options);
       } else {
         if (!validateUrl(url)) {
           throw new Error('Please enter a valid Wikipedia URL (e.g., https://en.wikipedia.org/wiki/Artificial_intelligence)');
         }
-        quizData = await api.generateQuiz(url);
+        quizData = await api.generateQuiz(url, options);
       }
       setQuiz(quizData);
       setStep('result');
@@ -79,6 +104,8 @@ const EnhancedGenerateQuizTab = () => {
   const resetForm = () => {
     setUrl('');
     setFile(null);
+    setQuestionCount('');
+    setDifficulty('mixed');
     setQuiz(null);
     setStep('input');
     setError('');
@@ -179,6 +206,44 @@ const EnhancedGenerateQuizTab = () => {
                     </p>
                   </div>
                 )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="difficulty" className="block text-sm font-medium text-gray-700 mb-2">
+                      Difficulty
+                    </label>
+                    <select
+                      id="difficulty"
+                      value={difficulty}
+                      onChange={(e) => setDifficulty(e.target.value)}
+                      className="input-field"
+                      disabled={loading}
+                    >
+                      {DIFFICULTY_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="questionCount" className="block text-sm font-medium text-gray-700 mb-2">
+                      Questions
+                    </label>
+                    <input
+                      type="number"
+                      id="questionCount"
+                      min={MIN_QUESTION_COUNT}
+                      max={MAX_QUESTION_COUNT}
+                      value={questionCount}
+                      onChange={(e) => setQuestionCount(e.target.value)}
+                      placeholder="Auto"
+                      className="input-field"
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 -mt-2">
+                  Leave questions blank to scale automatically with content length ({MIN_QUESTION_COUNT}–{MAX_QUESTION_COUNT}).
+                </p>
 
                 <button
                   type="submit"

@@ -39,6 +39,6 @@ class QuizOutput(BaseModel):
     )
     sections: List[str] = Field(description="Main sections of the article")
     quiz: List[QuizQuestion] = Field(
-        description="5-8 quiz questions", min_length=5, max_length=8
+        description="Quiz questions covering the source content", min_length=3, max_length=40
     )
     related_topics: List[str] = Field(description="Suggested related Wikipedia topics")

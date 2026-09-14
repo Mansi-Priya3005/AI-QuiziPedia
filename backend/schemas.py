@@ -22,8 +22,17 @@ class QuizQuestion(BaseModel):
     explanation: str
 
 
+DIFFICULTY_OPTIONS = ("easy", "medium", "hard", "mixed")
+MIN_QUESTION_COUNT = 3
+MAX_QUESTION_COUNT = 40
+
+
 class QuizRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
+    question_count: Optional[int] = Field(
+        default=None, ge=MIN_QUESTION_COUNT, le=MAX_QUESTION_COUNT
+    )
+    difficulty: str = Field(default="mixed")
 
     @field_validator("url")
     @classmethod
@@ -32,11 +41,20 @@ class QuizRequest(BaseModel):
             raise ValueError("url must be a valid Wikipedia article URL")
         return v
 
+    @field_validator("difficulty")
+    @classmethod
+    def must_be_valid_difficulty(cls, v: str) -> str:
+        if v not in DIFFICULTY_OPTIONS:
+            raise ValueError(f"difficulty must be one of {DIFFICULTY_OPTIONS}")
+        return v
+
 
 class QuizResponse(BaseModel):
     id: int
     url: Optional[str] = None
     source_type: str = "wikipedia"
+    question_count: Optional[int] = None
+    difficulty: Optional[str] = None
     title: str
     summary: str
     key_entities: dict
@@ -49,6 +67,8 @@ class QuizHistory(BaseModel):
     id: int
     url: Optional[str] = None
     source_type: str = "wikipedia"
+    question_count: Optional[int] = None
+    difficulty: Optional[str] = None
     title: str
     date_generated: datetime
     attempts_count: int

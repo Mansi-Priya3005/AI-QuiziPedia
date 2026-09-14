@@ -1,7 +1,7 @@
 import json
 import logging
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -9,7 +9,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 import schemas
 from auth import create_access_token, get_current_user, hash_password, verify_password
@@ -56,6 +56,8 @@ def _quiz_to_response_dict(quiz: Quiz) -> dict:
         "id": quiz.id,
         "url": quiz.url,
         "source_type": quiz.source_type,
+        "question_count": quiz.question_count,
+        "difficulty": quiz.difficulty,
         "title": quiz.title,
         "summary": quiz_data.get("summary", ""),
         "key_entities": quiz_data.get("key_entities", {}),
@@ -135,11 +137,13 @@ async def generate_quiz(
             detail="Invalid Wikipedia URL",
         )
 
-    existing_quiz = (
-        db.query(Quiz)
-        .filter(Quiz.url == quiz_request.url, Quiz.owner_id == current_user.id)
-        .first()
-    )
+    dedup_filters = [
+        Quiz.url == quiz_request.url,
+        Quiz.owner_id == current_user.id,
+        Quiz.question_count == quiz_request.question_count,
+        Quiz.difficulty == quiz_request.difficulty,
+    ]
+    existing_quiz = db.query(Quiz).filter(*dedup_filters).first()
     if existing_quiz:
         return _quiz_to_response_dict(existing_quiz)
 
@@ -149,7 +153,11 @@ async def generate_quiz(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     try:
-        quiz_data = quiz_generator.generate_quiz(article_text)
+        quiz_data = quiz_generator.generate_quiz(
+            article_text,
+            question_count=quiz_request.question_count,
+            difficulty=quiz_request.difficulty,
+        )
     except QuizGenerationError as e:
         # Explicit 502 (upstream/AI failure) instead of silently storing a
         # fallback quiz that looks like real content in quiz history.
@@ -163,6 +171,8 @@ async def generate_quiz(
         owner_id=current_user.id,
         url=quiz_request.url,
         source_type="wikipedia",
+        question_count=quiz_request.question_count,
+        difficulty=quiz_request.difficulty,
         title=title or "Unknown Title",
         scraped_content=article_text,
     )
@@ -172,17 +182,13 @@ async def generate_quiz(
     try:
         db.commit()
     except IntegrityError:
-        # Two concurrent requests for the same (user, URL) pair can both
-        # pass the existing_quiz check above and both try to insert — the
-        # unique constraint on (owner_id, url) is the real guard, this
-        # just turns the resulting race into "return the quiz the other
-        # request created" instead of a raw 500.
+        # Two concurrent requests for the same (user, URL, settings)
+        # combination can both pass the existing_quiz check above and
+        # both try to insert — the unique constraint is the real guard,
+        # this just turns the resulting race into "return the quiz the
+        # other request created" instead of a raw 500.
         db.rollback()
-        existing_quiz = (
-            db.query(Quiz)
-            .filter(Quiz.url == quiz_request.url, Quiz.owner_id == current_user.id)
-            .first()
-        )
+        existing_quiz = db.query(Quiz).filter(*dedup_filters).first()
         if existing_quiz:
             return _quiz_to_response_dict(existing_quiz)
         raise HTTPException(
@@ -199,9 +205,24 @@ async def generate_quiz(
 async def generate_quiz_from_file(
     request: Request,  # required by slowapi's limiter decorator
     file: UploadFile = File(...),
+    question_count: Optional[int] = Form(None),
+    difficulty: str = Form("mixed"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if difficulty not in schemas.DIFFICULTY_OPTIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"difficulty must be one of {schemas.DIFFICULTY_OPTIONS}",
+        )
+    if question_count is not None and not (
+        schemas.MIN_QUESTION_COUNT <= question_count <= schemas.MAX_QUESTION_COUNT
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"question_count must be between {schemas.MIN_QUESTION_COUNT} and {schemas.MAX_QUESTION_COUNT}",
+        )
+
     file_bytes = await file.read()
 
     try:
@@ -214,7 +235,9 @@ async def generate_quiz_from_file(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     try:
-        quiz_data = quiz_generator.generate_quiz(document_text)
+        quiz_data = quiz_generator.generate_quiz(
+            document_text, question_count=question_count, difficulty=difficulty
+        )
     except QuizGenerationError as e:
         logger.error("Quiz generation failed for uploaded file %s: %s", file.filename, e)
         raise HTTPException(
@@ -228,6 +251,8 @@ async def generate_quiz_from_file(
         owner_id=current_user.id,
         url=None,
         source_type="upload",
+        question_count=len(quiz_data.quiz),
+        difficulty=difficulty,
         title=file.filename or "Uploaded document",
         scraped_content=document_text,
     )
@@ -400,6 +425,8 @@ def get_quiz_history(
             "id": quiz.id,
             "url": quiz.url,
             "source_type": quiz.source_type,
+            "question_count": quiz.question_count,
+            "difficulty": quiz.difficulty,
             "title": quiz.title,
             "date_generated": quiz.date_generated,
             "attempts_count": attempts_count,

@@ -6,7 +6,7 @@ from pypdf.errors import PdfReadError
 
 logger = logging.getLogger(__name__)
 
-MAX_CONTENT_CHARS = 12000  # matches the Wikipedia scraper's limit
+MAX_CONTENT_CHARS = 300_000  # generous but bounded -- see llm_quiz_generator.MAX_ARTICLE_CHARS
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_CONTENT_TYPES = {"application/pdf", "text/plain"}
 

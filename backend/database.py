@@ -38,12 +38,16 @@ class User(Base):
 class Quiz(Base):
     __tablename__ = "quizzes"
     __table_args__ = (
-        # Each user gets their own copy of a quiz for a given URL, rather
-        # than one global quiz shared across all users -- so uniqueness is
-        # scoped per-owner, not global. Uploaded documents have url=NULL,
-        # and Postgres treats NULLs as distinct for uniqueness purposes,
-        # so multiple uploads never collide with each other here.
-        UniqueConstraint("owner_id", "url", name="uq_quizzes_owner_url"),
+        # Each user gets their own copy of a quiz for a given (URL,
+        # question_count, difficulty) combination -- not just URL alone.
+        # Without question_count/difficulty in the key, requesting the
+        # same article again with different settings would either
+        # silently return the old quiz (ignoring the new settings) or
+        # hit a 409 conflict on the old (owner_id, url)-only constraint.
+        UniqueConstraint(
+            "owner_id", "url", "question_count", "difficulty",
+            name="uq_quizzes_owner_url_params",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -52,6 +56,13 @@ class Quiz(Base):
     # URL. source_type distinguishes how to interpret this row.
     url = Column(String, nullable=True, index=True)
     source_type = Column(String, nullable=False, default="wikipedia", server_default="wikipedia")
+    # The resolved generation parameters actually used, so re-requesting
+    # the same source with different settings creates a distinct quiz
+    # rather than colliding with an old one. Nullable so pre-existing rows
+    # from before this feature existed don't need backfilling with a
+    # guessed value -- they simply never match new parameterized requests.
+    question_count = Column(Integer, nullable=True)
+    difficulty = Column(String, nullable=True)
     title = Column(String, nullable=False)
     date_generated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     scraped_content = Column(Text)

@@ -1,4 +1,5 @@
 import logging
+from typing import Optional
 
 from google import genai
 from google.genai import types
@@ -17,7 +18,20 @@ from models import QuizOutput
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "gemini-3.6-flash"
-MAX_ARTICLE_CHARS = 12000  # ~ a few thousand tokens, well within context
+
+# gemini-3.6-flash has a 1,048,576 token context window (~4 chars/token is
+# a reasonable rule of thumb for English text), so a 12,000-character cap
+# was using well under 1% of what's actually available -- that was the
+# root cause of large documents (e.g. a 48-page PDF) getting truncated to
+# a handful of pages before the model ever saw the rest. This is set well
+# below the real limit to leave headroom for the prompt/schema overhead
+# and the model's own output tokens, while covering the vast majority of
+# real documents (this is roughly 150-200 pages of text) in full.
+MAX_ARTICLE_CHARS = 400_000
+
+MIN_QUESTIONS = 3
+MAX_QUESTIONS = 40
+DIFFICULTIES = ("easy", "medium", "hard", "mixed")
 
 
 class QuizGenerationError(Exception):
@@ -30,23 +44,47 @@ class QuizGenerationError(Exception):
     """
 
 
-PROMPT_TEMPLATE = """You are an expert educational content creator. Create a \
-comprehensive quiz based on the following Wikipedia article content.
+def compute_default_question_count(content_length: int) -> int:
+    """Scale the target question count to how much source content there
+    actually is, instead of a fixed 5-8 regardless of whether the source
+    is a paragraph or a 48-page document. Roughly one question per 1,500
+    characters of source text, bounded to a sane range."""
+    estimated = content_length // 1500
+    return max(MIN_QUESTIONS, min(MAX_QUESTIONS, estimated))
 
-ARTICLE CONTENT:
+
+PROMPT_TEMPLATE = """You are an expert educational content creator. Create a \
+comprehensive quiz based on the following source content.
+
+SOURCE CONTENT:
 {article_text}
 
 INSTRUCTIONS:
-1. Generate 5-8 high-quality quiz questions that test understanding of key concepts.
+1. Generate EXACTLY {question_count} high-quality quiz questions that test \
+understanding of key concepts. Draw questions from across the ENTIRE source \
+content provided, not just the beginning -- if the content covers many \
+distinct topics or sections, distribute questions across all of them rather \
+than clustering on the first few.
 2. Questions must be factual and directly answerable from the provided content only.
 3. Each question must have exactly 4 options.
 4. The "answer" field must contain ONLY the letter A, B, C, or D — never the option text.
-5. Assign a difficulty level (easy, medium, or hard) per question.
-6. Provide a brief explanation for each answer, grounded in the article text.
-7. Extract key entities (people, organizations, locations) mentioned in the article.
-8. Identify the main sections/topics covered by the article.
-9. Suggest 3-5 related Wikipedia topics for further reading.
+5. {difficulty_instruction}
+6. Provide a brief explanation for each answer, grounded in the source content.
+7. Extract key entities (people, organizations, locations) mentioned in the content.
+8. Identify the main sections/topics covered by the content.
+9. Suggest 3-5 related topics for further reading.
 """
+
+DIFFICULTY_INSTRUCTIONS = {
+    "mixed": "Assign a difficulty level (easy, medium, or hard) per question, "
+    "with a reasonable mix across the quiz.",
+    "easy": "Every question must be easy difficulty -- straightforward recall "
+    "of explicitly stated facts.",
+    "medium": "Every question must be medium difficulty -- requires connecting "
+    "two or more pieces of information from the content.",
+    "hard": "Every question must be hard difficulty -- requires deeper "
+    "understanding, inference, or synthesis across the content, not just recall.",
+}
 
 
 def _is_retryable_api_error(exc: BaseException) -> bool:
@@ -71,8 +109,12 @@ class QuizGenerator:
         wait=wait_exponential(multiplier=1, min=1, max=8),
         reraise=True,
     )
-    def _call_model(self, article_text: str):
-        prompt = PROMPT_TEMPLATE.format(article_text=article_text[:MAX_ARTICLE_CHARS])
+    def _call_model(self, article_text: str, question_count: int, difficulty: str):
+        prompt = PROMPT_TEMPLATE.format(
+            article_text=article_text[:MAX_ARTICLE_CHARS],
+            question_count=question_count,
+            difficulty_instruction=DIFFICULTY_INSTRUCTIONS[difficulty],
+        )
         return self.client.models.generate_content(
             model=MODEL_NAME,
             contents=prompt,
@@ -87,16 +129,38 @@ class QuizGenerator:
             ),
         )
 
-    def generate_quiz(self, article_text: str) -> QuizOutput:
+    def generate_quiz(
+        self,
+        article_text: str,
+        question_count: Optional[int] = None,
+        difficulty: str = "mixed",
+    ) -> QuizOutput:
         """Generate a quiz from article text using structured Gemini output.
 
+        question_count: exact number of questions to request. If None,
+        scales automatically with content length (see
+        compute_default_question_count).
+        difficulty: "easy" | "medium" | "hard" | "mixed" (default).
+
         Raises QuizGenerationError on any failure (network, API, or
-        validation) after retries are exhausted. Callers must handle this
-        explicitly rather than receiving a fake "quiz" that just describes
-        the failure.
+        validation) after retries are exhausted, or on invalid arguments.
+        Callers must handle this explicitly rather than receiving a fake
+        "quiz" that just describes the failure.
         """
+        if difficulty not in DIFFICULTIES:
+            raise QuizGenerationError(
+                f"Invalid difficulty {difficulty!r}, must be one of {DIFFICULTIES}"
+            )
+
+        if question_count is None:
+            question_count = compute_default_question_count(len(article_text))
+        elif not (MIN_QUESTIONS <= question_count <= MAX_QUESTIONS):
+            raise QuizGenerationError(
+                f"question_count must be between {MIN_QUESTIONS} and {MAX_QUESTIONS}"
+            )
+
         try:
-            response = self._call_model(article_text)
+            response = self._call_model(article_text, question_count, difficulty)
         except APIError as e:
             logger.error("Gemini API error during quiz generation: %s", e)
             raise QuizGenerationError(f"AI generation failed: {e}") from e
@@ -120,6 +184,8 @@ class QuizGenerator:
                 ) from e
 
         self._normalize_answers(quiz_data)
+        if difficulty != "mixed":
+            self._enforce_difficulty(quiz_data, difficulty)
         return quiz_data
 
     @staticmethod
@@ -141,3 +207,13 @@ class QuizGenerator:
                 raise QuizGenerationError(
                     f"AI produced an unparseable answer key: {question.answer!r}"
                 )
+
+    @staticmethod
+    def _enforce_difficulty(quiz_data: QuizOutput, difficulty: str) -> None:
+        """The prompt asks the model to label every question with the
+        requested difficulty, but metadata consistency shouldn't depend on
+        the model following instructions perfectly -- enforce it directly
+        rather than trusting free-form compliance, same reasoning as the
+        answer-letter normalization above."""
+        for question in quiz_data.quiz:
+            question.difficulty = difficulty

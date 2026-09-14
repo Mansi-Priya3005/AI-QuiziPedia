@@ -7,7 +7,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-MAX_CONTENT_CHARS = 12000
+MAX_CONTENT_CHARS = 300_000  # generous but bounded -- see llm_quiz_generator.MAX_ARTICLE_CHARS
 REQUEST_TIMEOUT = 15.0
 # Wikimedia's User-Agent policy asks for a descriptive, contact-identifying
 # UA rather than a spoofed browser string. Spoofing a browser UA is also
