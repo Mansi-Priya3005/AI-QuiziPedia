@@ -1,5 +1,6 @@
 import io
 import logging
+import unicodedata
 
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
@@ -14,6 +15,35 @@ ALLOWED_CONTENT_TYPES = {"application/pdf", "text/plain"}
 class DocumentExtractionError(Exception):
     """Raised with a specific, user-facing reason a file couldn't be
     turned into quiz-source text."""
+
+
+def _sanitize_extracted_text(text: str) -> str:
+    """Strip characters that shouldn't be sent to the Gemini API as part
+    of a request.
+
+    PDFs with embedded/custom fonts (particularly CFF Type1 fonts) can
+    produce garbled output on extraction -- null bytes, control
+    characters, or invalid/lone surrogate code points -- even with
+    fontTools installed for better decoding. Gemini's API rejects
+    requests containing such bytes with a generic 400 INVALID_ARGUMENT
+    that gives no indication the problem is un-sanitized PDF text, which
+    is exactly what happened in testing. This is defense-in-depth: clean
+    extraction should rarely trigger it, but nothing here assumes any
+    given PDF's extraction will be clean.
+    """
+    cleaned_chars = []
+    for ch in text:
+        if ch in ("\n", "\t", "\r"):
+            cleaned_chars.append(ch)
+            continue
+        category = unicodedata.category(ch)
+        # Cc = control characters, Cs = surrogates (invalid outside of
+        # UTF-16 encoding internals), Co/Cn = private-use/unassigned code
+        # points that sometimes appear from broken font-encoding maps.
+        if category in ("Cc", "Cs", "Co", "Cn"):
+            continue
+        cleaned_chars.append(ch)
+    return "".join(cleaned_chars)
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
@@ -37,6 +67,7 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
             logger.warning("Failed to extract a page from PDF: %s", e)
 
     text = " ".join(pages_text)
+    text = _sanitize_extracted_text(text)
     text = " ".join(text.split())  # collapse whitespace
 
     if not text.strip():
@@ -72,6 +103,7 @@ def extract_text_from_upload(filename: str, content_type: str, file_bytes: bytes
             raise DocumentExtractionError(
                 "Couldn't read that text file (unsupported encoding -- please use UTF-8)."
             ) from e
+        text = _sanitize_extracted_text(text)
         text = " ".join(text.split())
     else:
         raise DocumentExtractionError(

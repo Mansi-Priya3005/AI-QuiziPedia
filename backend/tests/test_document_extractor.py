@@ -84,3 +84,34 @@ def test_detects_pdf_by_extension_even_with_wrong_content_type():
     pdf_bytes = _make_real_pdf(["Some real content here."])
     text = extract_text_from_upload("document.pdf", "application/octet-stream", pdf_bytes)
     assert "Some real content" in text
+
+
+def test_sanitizes_garbled_extraction_artifacts():
+    """Regression test: a real 400 INVALID_ARGUMENT from the Gemini API
+    was traced to unsanitized control/private-use characters left over
+    from a PDF with embedded fonts pypdf couldn't fully decode. Text
+    reaching the LLM must never contain these, regardless of which PDF
+    produces them."""
+    from document_extractor import _sanitize_extracted_text
+
+    garbled = (
+        "Ada Lovelace\x00 was an English mathematician\x01\x02."
+        + chr(0xE000)
+        + chr(0xE001)
+        + " She studied at Cambridge."
+    )
+    cleaned = _sanitize_extracted_text(garbled)
+
+    assert "\x00" not in cleaned
+    assert "\x01" not in cleaned
+    assert chr(0xE000) not in cleaned
+    assert "Ada Lovelace" in cleaned
+    assert "Cambridge" in cleaned
+    cleaned.encode("utf-8")  # must not raise
+
+
+def test_sanitization_preserves_legitimate_unicode():
+    from document_extractor import _sanitize_extracted_text
+
+    legit = "Café, naïve, résumé — \u201cquoted text\u201d and 100% valid."
+    assert _sanitize_extracted_text(legit) == legit
