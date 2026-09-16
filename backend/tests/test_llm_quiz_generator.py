@@ -194,3 +194,51 @@ def test_generate_quiz_mixed_difficulty_leaves_model_choices_alone(generator):
         result = generator.generate_quiz("text", difficulty="mixed")
 
     assert [q.difficulty for q in result.quiz] == ["easy", "medium", "hard", "easy", "medium"]
+
+
+def test_empty_response_with_safety_finish_reason_gives_specific_error(generator):
+    """Regression test for a real live failure: Gemini returned HTTP 200
+    with .parsed=None and .text=None for a Wikipedia article with graphic
+    subject matter, and the old code turned that into the misleading
+    'didn't match the expected quiz format' -- when the real problem was
+    zero content, most likely a safety block. The error message must
+    reflect the real cause when the API tells us one."""
+    mock_candidate = MagicMock()
+    mock_candidate.finish_reason = "SAFETY"
+    mock_response = MagicMock()
+    mock_response.parsed = None
+    mock_response.text = None
+    mock_response.prompt_feedback = None
+    mock_response.candidates = [mock_candidate]
+
+    with patch.object(generator.client.models, "generate_content", return_value=mock_response):
+        with pytest.raises(QuizGenerationError, match="SAFETY"):
+            generator.generate_quiz("some sensitive article text")
+
+
+def test_empty_response_with_prompt_block_reason_gives_specific_error(generator):
+    mock_prompt_feedback = MagicMock()
+    mock_prompt_feedback.block_reason = "PROHIBITED_CONTENT"
+    mock_response = MagicMock()
+    mock_response.parsed = None
+    mock_response.text = None
+    mock_response.prompt_feedback = mock_prompt_feedback
+    mock_response.candidates = []
+
+    with patch.object(generator.client.models, "generate_content", return_value=mock_response):
+        with pytest.raises(QuizGenerationError, match="PROHIBITED_CONTENT"):
+            generator.generate_quiz("some sensitive article text")
+
+
+def test_empty_response_without_diagnostic_info_still_raises_cleanly(generator):
+    """If the SDK response shape is unexpected and no reason can be
+    extracted, the error path itself must not crash."""
+    mock_response = MagicMock()
+    mock_response.parsed = None
+    mock_response.text = None
+    mock_response.prompt_feedback = None
+    mock_response.candidates = []
+
+    with patch.object(generator.client.models, "generate_content", return_value=mock_response):
+        with pytest.raises(QuizGenerationError, match="no reason given"):
+            generator.generate_quiz("text")
