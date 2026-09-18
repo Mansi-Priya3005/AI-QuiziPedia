@@ -171,6 +171,21 @@ class QuizGenerator:
         parsed = getattr(response, "parsed", None)
         if isinstance(parsed, QuizOutput):
             quiz_data = parsed
+        elif not getattr(response, "text", None):
+            # No parsed object AND no text means the model produced no
+            # content at all -- this is a different failure mode from "the
+            # model's output didn't match our schema", and deserves a
+            # different, honest message. Common causes: the prompt or
+            # response was blocked by safety filters (sensitive source
+            # material -- e.g. a Wikipedia article or document with graphic
+            # or disturbing content), or the response was cut off before
+            # any content was produced.
+            reason = self._describe_empty_response(response)
+            logger.error("Gemini returned no content: %s", reason)
+            raise QuizGenerationError(
+                f"The AI declined to generate a quiz for this content ({reason}). "
+                "Try a different source, or a lower question count."
+            )
         else:
             # Fall back to manual parse if the SDK didn't attach .parsed
             # (e.g. schema mismatch) — still validated by Pydantic, still
@@ -187,6 +202,26 @@ class QuizGenerator:
         if difficulty != "mixed":
             self._enforce_difficulty(quiz_data, difficulty)
         return quiz_data
+
+    @staticmethod
+    def _describe_empty_response(response) -> str:
+        """Best-effort human-readable reason the model returned no
+        content, using whatever the API told us. Never raises -- this is
+        purely for a clearer error message, so a malformed/unexpected
+        response shape here must not itself crash the request."""
+        try:
+            prompt_feedback = getattr(response, "prompt_feedback", None)
+            if prompt_feedback and getattr(prompt_feedback, "block_reason", None):
+                return f"blocked: {prompt_feedback.block_reason}"
+
+            candidates = getattr(response, "candidates", None) or []
+            if candidates:
+                finish_reason = getattr(candidates[0], "finish_reason", None)
+                if finish_reason:
+                    return f"finish reason: {finish_reason}"
+        except Exception:
+            pass
+        return "no reason given by the API"
 
     @staticmethod
     def _normalize_answers(quiz_data: QuizOutput) -> None:
