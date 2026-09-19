@@ -198,10 +198,28 @@ class QuizGenerator:
                     "AI returned a response that didn't match the expected quiz format"
                 ) from e
 
+        self._validate_shape(quiz_data)
         self._normalize_answers(quiz_data)
         if difficulty != "mixed":
             self._enforce_difficulty(quiz_data, difficulty)
         return quiz_data
+
+    @staticmethod
+    def _validate_shape(quiz_data: QuizOutput) -> None:
+        """Enforces constraints that used to live in the schema sent to
+        Gemini (exactly 4 options per question, at least one question) --
+        moved here in Python because a response_schema with array-length
+        constraints (minItems/maxItems) is a documented cause of Gemini
+        returning a 400 INVALID_ARGUMENT on otherwise-valid requests. See
+        MAX_ARTICLE_CHARS comment history / commit log for the incident
+        this fixed."""
+        if not quiz_data.quiz:
+            raise QuizGenerationError("AI generated zero questions")
+        for i, question in enumerate(quiz_data.quiz):
+            if len(question.options) != 4:
+                raise QuizGenerationError(
+                    f"Question {i + 1} has {len(question.options)} options, expected exactly 4"
+                )
 
     @staticmethod
     def _describe_empty_response(response) -> str:

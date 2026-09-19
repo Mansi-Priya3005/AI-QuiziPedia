@@ -24,9 +24,12 @@ class KeyEntities(BaseModel):
 
 class QuizQuestion(BaseModel):
     question: str = Field(description="The quiz question")
-    options: List[str] = Field(
-        description="Exactly 4 answer options", min_length=4, max_length=4
-    )
+    # Deliberately no min_length/max_length here (previously 4/4): Google's
+    # own docs list "numbers with minimum and maximum limits" on array
+    # fields as a documented cause of a 400 INVALID_ARGUMENT with complex
+    # response schemas. The "exactly 4 options" constraint is enforced in
+    # Python after generation instead (see QuizGenerator._validate_shape).
+    options: List[str] = Field(description="Exactly 4 answer options")
     answer: str = Field(description="The correct answer letter: A, B, C, or D")
     difficulty: str = Field(description="Difficulty level: easy, medium, or hard")
     explanation: str = Field(description="Short explanation of the answer")
@@ -38,7 +41,9 @@ class QuizOutput(BaseModel):
         description="Key entities from the article, grouped into people, organizations, and locations"
     )
     sections: List[str] = Field(description="Main sections of the article")
-    quiz: List[QuizQuestion] = Field(
-        description="Quiz questions covering the source content", min_length=3, max_length=40
-    )
+    # Deliberately no min_length/max_length here either -- same reasoning
+    # as QuizQuestion.options above. The requested question count is
+    # enforced in Python after generation, not in the schema sent to
+    # Gemini.
+    quiz: List[QuizQuestion] = Field(description="Quiz questions covering the source content")
     related_topics: List[str] = Field(description="Suggested related Wikipedia topics")
