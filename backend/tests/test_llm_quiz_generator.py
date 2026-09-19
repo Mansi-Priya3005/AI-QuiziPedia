@@ -242,3 +242,56 @@ def test_empty_response_without_diagnostic_info_still_raises_cleanly(generator):
     with patch.object(generator.client.models, "generate_content", return_value=mock_response):
         with pytest.raises(QuizGenerationError, match="no reason given"):
             generator.generate_quiz("text")
+
+
+def test_response_schema_has_no_array_length_constraints():
+    """Regression test for a real live 400 INVALID_ARGUMENT: Google's own
+    docs list numeric min/max constraints on array fields in a
+    response_schema as a documented cause of this error. The schema
+    actually sent to Gemini must never include minItems/maxItems again."""
+    import json
+
+    schema = QuizOutput.model_json_schema()
+    schema_str = json.dumps(schema)
+    assert "minItems" not in schema_str
+    assert "maxItems" not in schema_str
+
+
+def test_wrong_option_count_is_rejected(generator):
+    quiz = QuizOutput(
+        summary="s",
+        key_entities={"people": [], "organizations": [], "locations": []},
+        sections=[],
+        quiz=[
+            QuizQuestion(
+                question="Q?",
+                options=["a", "b", "c"],  # only 3, not 4
+                answer="A",
+                difficulty="easy",
+                explanation="e",
+            )
+        ],
+        related_topics=[],
+    )
+    mock_response = MagicMock()
+    mock_response.parsed = quiz
+
+    with patch.object(generator.client.models, "generate_content", return_value=mock_response):
+        with pytest.raises(QuizGenerationError, match="expected exactly 4"):
+            generator.generate_quiz("text")
+
+
+def test_zero_questions_is_rejected(generator):
+    quiz = QuizOutput(
+        summary="s",
+        key_entities={"people": [], "organizations": [], "locations": []},
+        sections=[],
+        quiz=[],
+        related_topics=[],
+    )
+    mock_response = MagicMock()
+    mock_response.parsed = quiz
+
+    with patch.object(generator.client.models, "generate_content", return_value=mock_response):
+        with pytest.raises(QuizGenerationError, match="zero questions"):
+            generator.generate_quiz("text")
