@@ -157,10 +157,13 @@ def test_submit_attempt_scores_correctly(client, auth_headers, sample_quiz_outpu
             headers=auth_headers,
         ).json()
 
-    # all correct answers are "A" per sample_quiz_output
+    # Correct answer for every question is "A" per sample_quiz_output, but
+    # the real frontend submits the full option TEXT the user clicked
+    # (see QuizTaker's handleAnswerSelect), not the bare letter -- so the
+    # realistic correct submission for option A is "A) opt1", not "A".
     r = client.post(
         f"/quizzes/{quiz['id']}/attempt",
-        json={"answers": ["A", "A", "A", "A", "A"], "time_taken": 30},
+        json={"answers": ["A) opt1"] * 5, "time_taken": 30},
         headers=auth_headers,
     )
     assert r.status_code == 200
@@ -168,10 +171,89 @@ def test_submit_attempt_scores_correctly(client, auth_headers, sample_quiz_outpu
 
     r2 = client.post(
         f"/quizzes/{quiz['id']}/attempt",
-        json={"answers": ["B", "A", "A", "A", "A"], "time_taken": 30},
+        json={"answers": ["B) opt2"] + ["A) opt1"] * 4, "time_taken": 30},
         headers=auth_headers,
     )
     assert r2.json()["score"] == 80.0
+
+
+def test_scoring_matches_real_frontend_behavior_option_text_without_letter_prefix(
+    client, auth_headers
+):
+    """Regression test for a real reported bug: scores always came out
+    near 0% regardless of what the user actually selected. Root cause:
+    the frontend stores the full option TEXT the user clicked (not a
+    bare letter), but scoring compared user_answer's first CHARACTER
+    against the correct letter -- which only ever matched by coincidence
+    when an option's text happened to start with its own letter.
+
+    The existing scoring test used options like "A) opt1" (which starts
+    with its own letter) and submitted bare letters like "A" as the
+    answer, both of which accidentally satisfied the old broken logic.
+    This test uses option text with no letter prefix at all -- the
+    realistic shape of real Gemini output -- to actually catch this
+    class of bug.
+    """
+    from models import QuizOutput, QuizQuestion
+
+    quiz_output = QuizOutput(
+        summary="s",
+        key_entities={"people": [], "organizations": [], "locations": []},
+        sections=[],
+        quiz=[
+            QuizQuestion(
+                question="What is the capital of France?",
+                options=["Paris", "London", "Berlin", "Madrid"],
+                answer="A",  # "Paris" is correct, and does NOT start with "A"
+                difficulty="easy",
+                explanation="Paris is the capital of France.",
+            ),
+            QuizQuestion(
+                question="What is the capital of the UK?",
+                options=["Paris", "London", "Berlin", "Madrid"],
+                answer="B",  # "London" is correct, does NOT start with "B"
+                difficulty="easy",
+                explanation="London is the capital of the UK.",
+            ),
+        ],
+        related_topics=[],
+    )
+
+    with patch(
+        "main.scrape_wikipedia",
+        new=AsyncMock(return_value=("article text", "Geography")),
+    ), patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=quiz_output
+    ):
+        quiz = client.post(
+            "/generate-quiz",
+            json={"url": "https://en.wikipedia.org/wiki/Geography"},
+            headers=auth_headers,
+        ).json()
+
+    # Submit exactly what the real frontend sends: the full option TEXT
+    # the user clicked, for the objectively correct answer to both
+    # questions ("Paris" and "London").
+    r = client.post(
+        f"/quizzes/{quiz['id']}/attempt",
+        json={"answers": ["Paris", "London"], "time_taken": 30},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["score"] == 100.0, (
+        f"Expected 100% for objectively correct answers, got {body['score']}% "
+        "-- scoring is comparing against the wrong thing"
+    )
+    assert body["correct_answers"] == 2
+
+    # And a genuinely wrong answer must still score as wrong.
+    r2 = client.post(
+        f"/quizzes/{quiz['id']}/attempt",
+        json={"answers": ["Berlin", "Madrid"], "time_taken": 30},
+        headers=auth_headers,
+    )
+    assert r2.json()["score"] == 0.0
 
 
 def test_cannot_submit_attempt_on_another_users_quiz(client, sample_quiz_output):

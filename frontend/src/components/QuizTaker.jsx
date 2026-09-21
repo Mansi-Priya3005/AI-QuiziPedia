@@ -16,12 +16,26 @@ import { api } from '../services/api';
 // Shared scoring helpers (module scope) — previously duplicated inside
 // both QuizTaker and QuizResults, which had drifted into two copies of
 // the same logic living in one file.
-const isAnswerCorrect = (userAnswer, correctAnswer) => {
+const isAnswerCorrect = (userAnswer, correctAnswer, options = []) => {
   if (!userAnswer || !correctAnswer) return false;
 
   if (/^[A-D]$/i.test(correctAnswer.trim())) {
-    const userAnswerLetter = userAnswer.charAt(0).toUpperCase();
-    return userAnswerLetter === correctAnswer.trim().toUpperCase();
+    const letter = correctAnswer.trim().toUpperCase();
+    const optionIndex = letter.charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
+    if (options && options[optionIndex] !== undefined) {
+      // The user's stored answer is the full option TEXT they clicked
+      // (see handleAnswerSelect), not a bare letter -- so the correct
+      // letter has to be resolved to its option text before comparing.
+      // Comparing userAnswer.charAt(0) to the letter directly (the
+      // previous behavior) almost never matched, since an option's text
+      // rarely happens to start with its own correct letter -- this was
+      // the root cause of scores always coming out near 0%.
+      return userAnswer === options[optionIndex];
+    }
+    // No options available to resolve against (shouldn't normally
+    // happen) -- fall back to a direct letter comparison in case
+    // userAnswer is itself a bare letter.
+    return userAnswer.trim().toUpperCase() === letter;
   }
 
   return userAnswer === correctAnswer;
@@ -126,7 +140,7 @@ const QuizTaker = ({ quiz, onQuizComplete, showResults = false, attemptData = nu
   const calculateScore = () => {
     let correct = 0;
     quiz.quiz.forEach((question, index) => {
-      if (isAnswerCorrect(userAnswers[index], question.answer)) {
+      if (isAnswerCorrect(userAnswers[index], question.answer, question.options)) {
         correct++;
       }
     });
@@ -398,7 +412,7 @@ const QuizResults = ({ quiz, userAnswers, score, timeElapsed, onRetry, onExit, s
           {quiz.quiz.map((question, index) => {
             const userAnswer = userAnswers[index];
             const correctOption = findCorrectOption(question);
-            const isCorrect = isAnswerCorrect(userAnswer, question.answer);
+            const isCorrect = isAnswerCorrect(userAnswer, question.answer, question.options);
             
             return (
               <div key={index} className="border border-gray-200 rounded-xl p-6">

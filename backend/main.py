@@ -295,18 +295,29 @@ def submit_quiz_attempt(
             detail=f"Expected {len(quiz_questions)} answers, got {len(user_answers)}",
         )
 
-    def is_answer_correct(user_answer, correct_answer):
+    def is_answer_correct(user_answer, correct_answer, options):
         if not user_answer or not correct_answer:
             return False
-        if len(correct_answer.strip()) == 1 and correct_answer.strip().upper() in ["A", "B", "C", "D"]:
-            user_first_char = user_answer.strip()[0].upper() if user_answer else ""
-            return user_first_char == correct_answer.strip().upper()
+        stripped_correct = correct_answer.strip().upper()
+        if len(stripped_correct) == 1 and stripped_correct in ["A", "B", "C", "D"] and options:
+            # The client stores the full option TEXT the user clicked
+            # (see frontend QuizTaker's handleAnswerSelect), not a bare
+            # letter -- so the correct letter has to be resolved to its
+            # option text before comparing. Comparing user_answer's first
+            # character to the letter directly (the previous behavior)
+            # almost never matched, since option text rarely happens to
+            # start with its own correct letter -- this was the root
+            # cause of scores coming out near 0% regardless of what the
+            # user actually selected.
+            option_index = ord(stripped_correct) - ord("A")
+            if 0 <= option_index < len(options):
+                return user_answer.strip() == str(options[option_index]).strip()
         return user_answer.strip() == correct_answer.strip()
 
     correct_answers = sum(
         1
         for i, question in enumerate(quiz_questions)
-        if is_answer_correct(user_answers[i], question["answer"])
+        if is_answer_correct(user_answers[i], question["answer"], question.get("options", []))
     )
 
     total_questions = len(quiz_questions)
