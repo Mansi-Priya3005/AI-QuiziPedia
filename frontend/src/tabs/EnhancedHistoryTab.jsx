@@ -248,7 +248,7 @@ const EnhancedHistoryTab = ({ onGenerateNewQuiz }) => {
             </h3>
             <p className="text-gray-600 max-w-md mx-auto mb-6">
               {quizzes.length === 0 
-                ? 'Your generated quizzes will appear here. Start by creating your first quiz from a Wikipedia article!'
+                ? 'Your generated quizzes will appear here. Start by creating your first quiz from an article, document, or link!'
                 : 'No quizzes match your search criteria. Try adjusting your search terms.'
               }
             </p>

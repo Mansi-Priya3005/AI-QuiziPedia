@@ -18,6 +18,7 @@ from database import Quiz, QuizAttempt, User, get_db
 from document_extractor import DocumentExtractionError, extract_text_from_upload
 from llm_quiz_generator import QuizGenerationError, QuizGenerator
 from scraper import ScrapeError, scrape_wikipedia, validate_wikipedia_url
+from web_extractor import fetch_url_content
 
 logging.basicConfig(
     level=logging.INFO if settings.is_production else logging.DEBUG,
@@ -65,6 +66,21 @@ def _quiz_to_response_dict(quiz: Quiz) -> dict:
         "quiz": quiz_data.get("quiz", []),
         "related_topics": quiz_data.get("related_topics", []),
     }
+
+
+async def _load_source_from_url(url: str):
+    """Returns (text, title, source_type) for any supported link.
+
+    Wikipedia keeps its dedicated MediaWiki-API path (cleaner and more
+    reliable than scraping rendered HTML); every other link -- web pages,
+    Google Docs/Slides, Drive files, hosted PDFs -- goes through the
+    generic fetcher. Raises ScrapeError with a user-facing reason.
+    """
+    if validate_wikipedia_url(url):
+        text, title = await scrape_wikipedia(url)
+        return text, title, "wikipedia"
+    fetched = await fetch_url_content(url)
+    return fetched.text, fetched.title, fetched.source_type
 
 
 @app.get("/")
@@ -128,15 +144,6 @@ async def generate_quiz(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # schemas.QuizRequest already validates this is a Wikipedia URL, but
-    # validate_wikipedia_url is kept as a second explicit check since it's
-    # also used standalone (e.g. in tests).
-    if not validate_wikipedia_url(quiz_request.url):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid Wikipedia URL",
-        )
-
     dedup_filters = [
         Quiz.url == quiz_request.url,
         Quiz.owner_id == current_user.id,
@@ -148,7 +155,7 @@ async def generate_quiz(
         return _quiz_to_response_dict(existing_quiz)
 
     try:
-        article_text, title = await scrape_wikipedia(quiz_request.url)
+        article_text, title, source_type = await _load_source_from_url(quiz_request.url)
     except ScrapeError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -164,13 +171,13 @@ async def generate_quiz(
         logger.error("Quiz generation failed for %s: %s", quiz_request.url, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The AI service failed to generate a quiz for this article. Please try again.",
+            detail="The AI service failed to generate a quiz for this content. Please try again.",
         )
 
     db_quiz = Quiz(
         owner_id=current_user.id,
         url=quiz_request.url,
-        source_type="wikipedia",
+        source_type=source_type,
         question_count=quiz_request.question_count,
         difficulty=quiz_request.difficulty,
         title=title or "Unknown Title",

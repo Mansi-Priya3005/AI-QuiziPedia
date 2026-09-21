@@ -1,10 +1,8 @@
-import re
 from datetime import datetime
+from urllib.parse import urlparse
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
-
-WIKIPEDIA_URL_PATTERN = re.compile(r"^https://([a-z]{2,12}\.)?wikipedia\.org/wiki/.+")
 
 # These bounds exist because the previous version trusted the client's
 # answers/time_taken completely: a client could submit 10,000 answers for
@@ -36,9 +34,15 @@ class QuizRequest(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def must_be_wikipedia_url(cls, v: str) -> str:
-        if not WIKIPEDIA_URL_PATTERN.match(v):
-            raise ValueError("url must be a valid Wikipedia article URL")
+    def must_be_http_url(cls, v: str) -> str:
+        # Shape check only (http/https + a host). Whether the link is
+        # actually fetchable -- and safe to fetch, i.e. not pointing at
+        # the server's own internal network -- is enforced in
+        # web_extractor, which has to re-check on every redirect anyway.
+        v = v.strip()
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("url must be a valid http(s) link")
         return v
 
     @field_validator("difficulty")

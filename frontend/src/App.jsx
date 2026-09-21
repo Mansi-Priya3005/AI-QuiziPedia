@@ -208,7 +208,7 @@ function AppShell() {
                 </div>
               </div>
               <p className="text-gray-400 max-w-md">
-                Harness the power of AI to transform Wikipedia articles into engaging, 
+                Harness the power of AI to transform articles, documents, and web pages into engaging, 
                 educational quizzes. Learn faster and test your knowledge instantly.
               </p>
             </div>

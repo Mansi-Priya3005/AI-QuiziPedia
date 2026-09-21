@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 const Hero = ({ onGetStarted }) => {
   const features = [
     { icon: Zap, text: 'AI-Powered Quiz Generation' },
-    { icon: Globe, text: 'Any Wikipedia Article' },
+    { icon: Globe, text: 'Any Link, Doc or PDF' },
     { icon: BookOpen, text: 'Instant Learning' }
   ];
 
@@ -27,7 +27,7 @@ const Hero = ({ onGetStarted }) => {
           >
             <Sparkles className="text-amber-500" size={16} />
             <span className="text-sm font-medium text-gray-700">
-              Transform Wikipedia into Interactive Learning
+              Transform Any Content into Interactive Learning
             </span>
           </motion.div>
 
@@ -52,8 +52,8 @@ const Hero = ({ onGetStarted }) => {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="text-xl md:text-2xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed"
           >
-            Transform any Wikipedia article into an engaging, educational quiz 
-            using advanced AI. Learn faster and test your knowledge instantly.
+            Turn any article, web page, Google Doc, or PDF into an engaging, 
+            educational quiz using AI. Learn faster and test your knowledge instantly.
           </motion.p>
 
           <motion.div
@@ -99,9 +99,9 @@ const Hero = ({ onGetStarted }) => {
             className="grid grid-cols-3 gap-8 max-w-2xl mx-auto mt-16"
           >
             {[
-              { number: '10K+', label: 'Quizzes Generated' },
-              { number: '99%', label: 'Accuracy Rate' },
-              { number: '5★', label: 'User Rating' }
+              { number: '500+', label: 'Quizzes Generated' },
+              { number: '3–40', label: 'Questions Per Quiz' },
+              { number: '4+', label: 'Content Sources' }
             ].map((stat, index) => (
               <div key={index} className="text-center">
                 <div className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">

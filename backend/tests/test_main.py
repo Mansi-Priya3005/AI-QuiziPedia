@@ -1,7 +1,10 @@
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from llm_quiz_generator import QuizGenerationError
 from scraper import ScrapeError
+from web_extractor import FetchedContent
 
 
 def test_root(client):
@@ -27,13 +30,71 @@ def test_quizzes_list_requires_auth(client):
     assert r.status_code == 401
 
 
-def test_generate_quiz_rejects_non_wikipedia_url(client, auth_headers):
-    r = client.post(
-        "/generate-quiz",
-        json={"url": "https://example.com/not-wiki"},
-        headers=auth_headers,
-    )
+@pytest.mark.parametrize(
+    "bad_url", ["not a url at all", "ftp://example.com/file.txt", "javascript:alert(1)", "file:///etc/passwd"]
+)
+def test_generate_quiz_rejects_non_http_url(client, auth_headers, bad_url):
+    r = client.post("/generate-quiz", json={"url": bad_url}, headers=auth_headers)
     assert r.status_code == 422
+
+
+def test_generate_quiz_accepts_non_wikipedia_url(client, auth_headers, sample_quiz_output):
+    """Any http(s) link is accepted now, not just Wikipedia -- non-Wikipedia
+    links go through the generic fetcher and are stored with its source_type."""
+    with patch(
+        "main.fetch_url_content",
+        new=AsyncMock(
+            return_value=FetchedContent(
+                text="blog post text", title="My Blog Post", source_type="web"
+            )
+        ),
+    ), patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ):
+        r = client.post(
+            "/generate-quiz",
+            json={"url": "https://example.com/blog/my-post"},
+            headers=auth_headers,
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["title"] == "My Blog Post"
+    assert body["source_type"] == "web"
+    assert body["url"] == "https://example.com/blog/my-post"
+
+
+def test_generate_quiz_google_doc_source_type(client, auth_headers, sample_quiz_output):
+    with patch(
+        "main.fetch_url_content",
+        new=AsyncMock(
+            return_value=FetchedContent(
+                text="notes", title="Lecture Notes", source_type="google_doc"
+            )
+        ),
+    ), patch.object(
+        __import__("main").quiz_generator, "generate_quiz", return_value=sample_quiz_output
+    ):
+        r = client.post(
+            "/generate-quiz",
+            json={"url": "https://docs.google.com/document/d/abc123DEF456/edit"},
+            headers=auth_headers,
+        )
+    assert r.status_code == 200
+    assert r.json()["source_type"] == "google_doc"
+
+
+def test_generate_quiz_fetch_failure_returns_400(client, auth_headers):
+    with patch(
+        "main.fetch_url_content",
+        new=AsyncMock(side_effect=ScrapeError("That page couldn't be found (HTTP 404).")),
+    ):
+        r = client.post(
+            "/generate-quiz",
+            json={"url": "https://example.com/missing"},
+            headers=auth_headers,
+        )
+    assert r.status_code == 400
+    assert "404" in r.json()["detail"]
 
 
 def test_generate_quiz_happy_path(client, auth_headers, sample_quiz_output):

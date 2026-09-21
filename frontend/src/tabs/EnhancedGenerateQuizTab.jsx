@@ -36,9 +36,17 @@ const EnhancedGenerateQuizTab = () => {
   const [quiz, setQuiz] = useState(null);
   const [step, setStep] = useState('input');
 
-  const validateUrl = (url) => {
-    const wikipediaRegex = /^https:\/\/[a-z]{2,12}\.wikipedia\.org\/wiki\/[^/]+$/;
-    return wikipediaRegex.test(url);
+  // Any http(s) link is accepted (articles, blogs, Google Docs/Slides,
+  // Drive files, hosted PDFs). Whether it's actually fetchable -- e.g. a
+  // Google Doc that isn't shared publicly -- is checked by the backend,
+  // which returns a specific error message.
+  const validateUrl = (value) => {
+    try {
+      const parsed = new URL(value.trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
   };
 
   const handleFileChange = (e) => {
@@ -87,9 +95,9 @@ const EnhancedGenerateQuizTab = () => {
         quizData = await api.generateQuizFromFile(file, options);
       } else {
         if (!validateUrl(url)) {
-          throw new Error('Please enter a valid Wikipedia URL (e.g., https://en.wikipedia.org/wiki/Artificial_intelligence)');
+          throw new Error('Please enter a valid link starting with http:// or https://');
         }
-        quizData = await api.generateQuiz(url, options);
+        quizData = await api.generateQuiz(url.trim(), options);
       }
       setQuiz(quizData);
       setStep('result');
@@ -125,7 +133,7 @@ const EnhancedGenerateQuizTab = () => {
             Generate <span className="gradient-text">AI Quiz</span>
           </h1>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Paste any Wikipedia article URL and watch as AI transforms it into an engaging educational quiz.
+            Paste a link to any article, Google Doc, or PDF, or upload a file, and watch as AI transforms it into an engaging educational quiz.
           </p>
         </motion.div>
 
@@ -142,7 +150,7 @@ const EnhancedGenerateQuizTab = () => {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">Create Quiz</h2>
-                  <p className="text-gray-600 text-sm">From Wikipedia URL</p>
+                  <p className="text-gray-600 text-sm">From a link or a file</p>
                 </div>
               </div>
 
@@ -156,7 +164,7 @@ const EnhancedGenerateQuizTab = () => {
                     }`}
                   >
                     <LinkIcon size={16} />
-                    Wikipedia URL
+                    Paste a Link
                   </button>
                   <button
                     type="button"
@@ -173,19 +181,20 @@ const EnhancedGenerateQuizTab = () => {
                 {sourceMode === 'url' ? (
                   <div>
                     <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-2">
-                      Wikipedia Article URL
+                      Article, Doc or Drive Link
                     </label>
                     <input
                       type="url"
                       id="url"
                       value={url}
                       onChange={(e) => setUrl(e.target.value)}
-                      placeholder="https://en.wikipedia.org/wiki/..."
+                      placeholder="https://..."
                       className="input-field"
                       disabled={loading}
                     />
                     <p className="text-xs text-gray-500 mt-2">
-                      Example: https://en.wikipedia.org/wiki/Artificial_intelligence
+                      Works with web pages, Wikipedia, Google Docs &amp; Slides, Drive files, and PDF links.
+                      Google links must be shared as &quot;Anyone with the link&quot;.
                     </p>
                   </div>
                 ) : (
@@ -279,7 +288,7 @@ const EnhancedGenerateQuizTab = () => {
                 <h3 className="font-semibold text-gray-900 mb-4">What you&apos;ll get:</h3>
                 <div className="space-y-3">
                   {[
-                    '5-10 AI-generated questions',
+                    'Custom number of AI-generated questions',
                     'Multiple difficulty levels',
                     'Detailed explanations',
                     'Key entities extraction',
@@ -309,7 +318,7 @@ const EnhancedGenerateQuizTab = () => {
                   
                   <div className="mt-8 grid grid-cols-3 gap-4 max-w-md mx-auto">
                     {[
-                      { text: 'Scraping Article', color: 'bg-blue-500' },
+                      { text: 'Fetching Content', color: 'bg-blue-500' },
                       { text: 'Analyzing Content', color: 'bg-purple-500' },
                       { text: 'Generating Quiz', color: 'bg-primary-500' }
                     ].map((stepItem, index) => (
@@ -359,7 +368,7 @@ const EnhancedGenerateQuizTab = () => {
                     Ready to Generate Magic?
                   </h3>
                   <p className="text-gray-600 max-w-md mx-auto mb-8">
-                    Enter a Wikipedia URL above and watch as AI transforms it into an engaging educational quiz with questions, explanations, and key insights.
+                    Paste a link or upload a file and watch as AI transforms it into an engaging educational quiz with questions, explanations, and key insights.
                   </p>
                   
                   <div className="max-w-md mx-auto">

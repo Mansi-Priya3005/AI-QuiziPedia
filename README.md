@@ -1,12 +1,13 @@
 # AI QuiziPedia 🧠📚
 
-An AI-powered full-stack educational web application that transforms Wikipedia articles into interactive quizzes for smarter learning. Built with FastAPI, React, PostgreSQL, and Google Gemini.
+An AI-powered full-stack educational web application that transforms articles, web pages, Google Docs, and PDFs into interactive quizzes for smarter learning. Built with FastAPI, React, PostgreSQL, and Google Gemini.
 
 ## 🚀 Features
 
 ### 🤖 AI-Powered Quiz Generation
-- **Instant Quiz Creation**: Convert any Wikipedia article into an interactive quiz in seconds
-- **PDF/Text Upload**: Generate a quiz from your own PDF or .txt document instead of a Wikipedia URL (up to 10 MB; scanned/image-only PDFs aren't supported yet, since that needs OCR)
+- **Instant Quiz Creation**: Paste a link to any article and get an interactive quiz in seconds. Supports Wikipedia, regular web pages, Google Docs & Slides, Google Drive files, and direct PDF/text links (Google links must be shared as "Anyone with the link")
+- **SSRF-safe link fetching**: Since the server fetches user-supplied URLs, every request and redirect hop is checked to resolve only to public IP addresses (blocks localhost, private ranges, and cloud metadata endpoints), with size and redirect caps
+- **PDF/Text Upload**: Generate a quiz from your own PDF or .txt document instead of a link (up to 10 MB; scanned/image-only PDFs aren't supported yet, since that needs OCR)
 - **Configurable Difficulty & Question Count**: Choose easy/medium/hard/mixed and how many questions to generate, or leave it on auto to scale with content length (roughly 1 question per 1,500 characters, 3–40 questions)
 - **Structured, schema-validated output**: Gemini's structured output mode enforces the quiz JSON shape directly, rather than hoping the model formats free text correctly
 - **Smart Content Analysis**: Extracts key sections, entities, and related topics from the article
@@ -37,8 +38,8 @@ An AI-powered full-stack educational web application that transforms Wikipedia a
 - **PostgreSQL** + **SQLAlchemy** — relational storage and ORM
 - **Alembic** — versioned, reversible schema migrations
 - **Google Gemini** (`google-genai`) — quiz generation with structured JSON output
-- **httpx** — async HTTP client for scraping (doesn't block the event loop)
-- **BeautifulSoup4** — Wikipedia HTML parsing
+- **httpx** — async HTTP client for fetching links (doesn't block the event loop)
+- **BeautifulSoup4** — readable-text extraction from arbitrary web pages
 - **Pydantic** — request/response validation
 - **slowapi** — rate limiting on the AI-backed endpoint
 - **tenacity** — retry with backoff on transient AI/network failures
@@ -168,7 +169,8 @@ AI-QuiziPedia/
 │   ├── schemas.py               # API request/response validation
 │   ├── models.py                # Gemini structured-output schema
 │   ├── llm_quiz_generator.py    # Gemini integration, retries, error handling
-│   ├── scraper.py               # async Wikipedia scraping
+│   ├── scraper.py               # async Wikipedia scraping (MediaWiki API)
+│   ├── web_extractor.py         # generic link fetching: web pages, Google Docs/Drive, PDFs (SSRF-guarded)
 │   ├── alembic/                 # database migrations
 │   ├── tests/                   # pytest suite
 │   ├── Dockerfile
