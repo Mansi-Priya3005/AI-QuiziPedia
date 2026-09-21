@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from llm_quiz_generator import QuizGenerationError
+from llm_quiz_generator import QuizGenerationError, QuotaExceededError
 from scraper import ScrapeError
 from web_extractor import FetchedContent
 
@@ -599,3 +599,24 @@ def test_generate_quiz_from_file_passes_question_count_and_difficulty(
     mock_generate.assert_called_once_with(
         "Some study notes.", question_count=12, difficulty="easy"
     )
+
+
+def test_generate_quiz_quota_exceeded_returns_429_with_clear_message(client, auth_headers):
+    with patch(
+        "main.fetch_url_content",
+        new=AsyncMock(
+            return_value=FetchedContent(text="text", title="T", source_type="web")
+        ),
+    ), patch.object(
+        __import__("main").quiz_generator,
+        "generate_quiz",
+        side_effect=QuotaExceededError("quota"),
+    ):
+        r = client.post(
+            "/generate-quiz",
+            json={"url": "https://example.com/post"},
+            headers=auth_headers,
+        )
+    assert r.status_code == 429
+    assert "usage limit" in r.json()["detail"]
+    assert client.get("/quizzes", headers=auth_headers).json()["total"] == 0

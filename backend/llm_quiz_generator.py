@@ -17,7 +17,7 @@ from models import QuizOutput
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.6-flash"
+MODEL_NAME = settings.gemini_model
 
 # gemini-3.6-flash has a 1,048,576 token context window (~4 chars/token is
 # a reasonable rule of thumb for English text), so a 12,000-character cap
@@ -42,6 +42,21 @@ class QuizGenerationError(Exception):
     quiz — a silently-stored "the AI failed" quiz is worse than a clear
     error, because it looks like real content in quiz history.
     """
+
+
+class QuotaExceededError(QuizGenerationError):
+    """The Gemini API rejected the request because a usage quota is used up
+    (HTTP 429). Separate from a generic failure so the API can tell the
+    user the real reason -- "try again later" -- instead of implying the
+    source content was the problem."""
+
+
+def _is_daily_quota_error(exc: BaseException) -> bool:
+    return (
+        isinstance(exc, APIError)
+        and exc.code == 429
+        and "PerDay" in str(exc)
+    )
 
 
 def compute_default_question_count(content_length: int) -> int:
@@ -92,6 +107,11 @@ def _is_retryable_api_error(exc: BaseException) -> bool:
     on 4xx client errors like a bad request or invalid API key, which will
     never succeed no matter how many times we retry."""
     if not isinstance(exc, APIError):
+        return False
+    # A per-DAY quota won't reset within our few-second backoff window, so
+    # retrying just wastes time (and requests). Per-minute 429s are worth
+    # retrying -- those do clear quickly.
+    if _is_daily_quota_error(exc):
         return False
     return exc.code in (429, 500, 502, 503, 504)
 
@@ -163,6 +183,8 @@ class QuizGenerator:
             response = self._call_model(article_text, question_count, difficulty)
         except APIError as e:
             logger.error("Gemini API error during quiz generation: %s", e)
+            if e.code == 429:
+                raise QuotaExceededError(f"AI quota exceeded: {e}") from e
             raise QuizGenerationError(f"AI generation failed: {e}") from e
         except Exception as e:  # network errors, timeouts, etc.
             logger.error("Unexpected error calling Gemini: %s", e)

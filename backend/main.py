@@ -16,7 +16,7 @@ from auth import create_access_token, get_current_user, hash_password, verify_pa
 from config import settings
 from database import Quiz, QuizAttempt, User, get_db
 from document_extractor import DocumentExtractionError, extract_text_from_upload
-from llm_quiz_generator import QuizGenerationError, QuizGenerator
+from llm_quiz_generator import QuizGenerationError, QuizGenerator, QuotaExceededError
 from scraper import ScrapeError, scrape_wikipedia, validate_wikipedia_url
 from web_extractor import fetch_url_content
 
@@ -49,6 +49,10 @@ app.add_middleware(
 )
 
 quiz_generator = QuizGenerator()
+
+QUOTA_EXCEEDED_MESSAGE = (
+    "The AI service has hit its usage limit for now. Please try again later."
+)
 
 
 def _quiz_to_response_dict(quiz: Quiz) -> dict:
@@ -165,6 +169,12 @@ async def generate_quiz(
             question_count=quiz_request.question_count,
             difficulty=quiz_request.difficulty,
         )
+    except QuotaExceededError as e:
+        logger.warning("Gemini quota exceeded for %s: %s", quiz_request.url, e)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=QUOTA_EXCEEDED_MESSAGE,
+        )
     except QuizGenerationError as e:
         # Explicit 502 (upstream/AI failure) instead of silently storing a
         # fallback quiz that looks like real content in quiz history.
@@ -244,6 +254,12 @@ async def generate_quiz_from_file(
     try:
         quiz_data = quiz_generator.generate_quiz(
             document_text, question_count=question_count, difficulty=difficulty
+        )
+    except QuotaExceededError as e:
+        logger.warning("Gemini quota exceeded for uploaded file %s: %s", file.filename, e)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=QUOTA_EXCEEDED_MESSAGE,
         )
     except QuizGenerationError as e:
         logger.error("Quiz generation failed for uploaded file %s: %s", file.filename, e)

@@ -3,7 +3,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from google.genai.errors import APIError
 
-from llm_quiz_generator import QuizGenerationError, QuizGenerator, compute_default_question_count
+from llm_quiz_generator import (
+    QuizGenerationError,
+    QuizGenerator,
+    QuotaExceededError,
+    compute_default_question_count,
+)
 from models import QuizOutput, QuizQuestion
 
 
@@ -68,6 +73,39 @@ def test_client_error_is_not_retried(generator):
             generator.generate_quiz("article text")
 
     assert calls["n"] == 1
+
+
+def test_daily_quota_error_is_not_retried_and_raises_quota_error(generator):
+    """A per-day 429 can't clear within the retry backoff, so retrying is
+    pointless -- it should fail fast with a distinct QuotaExceededError."""
+    calls = {"n": 0}
+
+    def raise_daily_429(*a, **kw):
+        calls["n"] += 1
+        raise APIError(
+            429,
+            {"message": "Quota exceeded for metric: GenerateRequestsPerDayPerProjectPerModel-FreeTier"},
+        )
+
+    with patch.object(generator.client.models, "generate_content", side_effect=raise_daily_429):
+        with pytest.raises(QuotaExceededError):
+            generator.generate_quiz("article text")
+
+    assert calls["n"] == 1
+
+
+def test_per_minute_429_is_still_retried(generator):
+    calls = {"n": 0}
+
+    def raise_minute_429(*a, **kw):
+        calls["n"] += 1
+        raise APIError(429, {"message": "Quota exceeded for metric: GenerateRequestsPerMinutePerProjectPerModel"})
+
+    with patch.object(generator.client.models, "generate_content", side_effect=raise_minute_429):
+        with pytest.raises(QuotaExceededError):
+            generator.generate_quiz("article text")
+
+    assert calls["n"] == 3
 
 
 def test_happy_path_normalizes_lowercase_answer(generator):

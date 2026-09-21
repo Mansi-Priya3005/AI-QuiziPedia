@@ -8,6 +8,9 @@ class Settings(BaseSettings):
 
     database_url: str
     gemini_api_key: str
+    # Quotas are tracked per model, so switching this (GEMINI_MODEL in .env)
+    # is the quickest way around a per-model free-tier limit.
+    gemini_model: str = "gemini-3.6-flash"
     cors_allowed_origins: str = "http://localhost:5173,http://localhost:3000"
     environment: str = "development"
 
